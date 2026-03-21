@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go mod init girls-rating-api)",
+      "Bash(go mod tidy)",
+      "Bash(set GOPROXY=https://goproxy.cn,direct)",
+      "Bash($env:GOPROXY=\"https://goproxy.cn,direct\")",
+      "Bash(go mod download)",
+      "Bash(GOPROXY=https://goproxy.cn,direct go mod download)",
+      "Bash(GOPROXY=https://goproxy.cn,direct go mod tidy)",
+      "Bash(GOPROXY=https://goproxy.cn,direct go build -o bin/app.exe ./cmd/main.go)",
+      "Bash(go version)"
+    ]
+  }
+}
