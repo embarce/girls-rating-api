@@ -10,7 +10,9 @@ import (
 	"girls-rating-api/pkg/jwt"
 
 	"github.com/go-playground/validator/v10"
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 var (
@@ -49,6 +51,18 @@ type LoginInput struct {
 	Password string `json:"password" validate:"required"`
 }
 
+// UserResponse 用户响应（不包含密码）
+type UserResponse struct {
+	ID        uint   `json:"id"`
+	Username  string `json:"username"`
+	Email     string `json:"email"`
+	Nickname  string `json:"nickname"`
+	Avatar    string `json:"avatar"`
+	Status    int    `json:"status"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 // Register 用户注册
 func (s *UserService) Register(ctx context.Context, input *RegisterInput) (*models.User, error) {
 	// 验证输入
@@ -57,14 +71,20 @@ func (s *UserService) Register(ctx context.Context, input *RegisterInput) (*mode
 	}
 
 	// 检查用户名或邮箱是否已存在
-	existingUser, _ := s.repo.FindByUsername(ctx, input.Username)
-	if existingUser != nil {
+	existingUser, err := s.repo.FindByUsername(ctx, input.Username)
+	if err == nil && existingUser != nil {
 		return nil, ErrUserExists
 	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("failed to check username: %w", err)
+	}
 
-	existingUser, _ = s.repo.FindByEmail(ctx, input.Email)
-	if existingUser != nil {
+	existingUser, err = s.repo.FindByEmail(ctx, input.Email)
+	if err == nil && existingUser != nil {
 		return nil, ErrUserExists
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("failed to check email: %w", err)
 	}
 
 	// 哈希密码
@@ -82,6 +102,11 @@ func (s *UserService) Register(ctx context.Context, input *RegisterInput) (*mode
 	}
 
 	if err := s.repo.Create(ctx, user); err != nil {
+		// 处理并发注册导致的唯一键冲突：让调用方收到业务语义，而不是裸 DB 错误。
+		var mysqlErr *mysqlDriver.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			return nil, ErrUserExists
+		}
 		return nil, err
 	}
 
@@ -98,7 +123,10 @@ func (s *UserService) Login(ctx context.Context, input *LoginInput) (string, str
 	// 查找用户
 	user, err := s.repo.FindByUsername(ctx, input.Username)
 	if err != nil {
-		return "", "", ErrUserNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", "", ErrUserNotFound
+		}
+		return "", "", err
 	}
 
 	// 验证密码
@@ -129,7 +157,10 @@ func (s *UserService) Login(ctx context.Context, input *LoginInput) (string, str
 func (s *UserService) GetProfile(ctx context.Context, userID uint) (*models.User, error) {
 	user, err := s.repo.FindByID(ctx, userID)
 	if err != nil {
-		return nil, ErrUserNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
 	}
 	return user, nil
 }

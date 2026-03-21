@@ -40,7 +40,7 @@
 
 ### 前置条件
 
-- Go 1.26+
+- Go 1.25+
 - Docker & Docker Compose
 - MySQL 8.0+
 - Redis 7+
@@ -85,13 +85,15 @@ make docker-up
 docker-compose up -d
 ```
 
-2. 查看日志
+2. 启动后请手动执行数据库迁移 SQL（例如 `migrations/001_init.sql`），以创建/更新表结构
+
+3. 查看日志
 
 ```bash
 docker-compose logs -f api
 ```
 
-3. 停止服务
+4. 停止服务
 
 ```bash
 make docker-down
@@ -100,6 +102,10 @@ docker-compose down
 ```
 
 ## API 接口
+
+### Swagger 文档
+
+启动服务后访问 `http://localhost:8080/swagger/index.html` 查看完整的 API 文档。
 
 ### 健康检查
 
@@ -178,6 +184,7 @@ Authorization: Bearer <access_token>
 | `REDIS_PASSWORD` | Redis 密码 | - |
 | `JWT_SECRET` | JWT 密钥 | - |
 | `JWT_EXPIRE` | JWT 过期时间 (小时) | 24 |
+| `GIN_TRUSTED_PROXIES` | Gin 可信代理列表（逗号分隔，IP 或 CIDR） | 空表示不信任任何代理 |
 
 ## License
 

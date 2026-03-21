@@ -1,4 +1,4 @@
-.PHONY: run build test clean docker-build docker-up docker-down migrate
+.PHONY: run build test clean docker-build docker-up docker-down migrate swagger
 
 # Run the application
 run:
@@ -15,6 +15,10 @@ test:
 # Clean build artifacts
 clean:
 	rm -rf bin/
+
+# Generate Swagger documentation
+swagger:
+	swag init -g cmd/main.go
 
 # Build Docker image
 docker-build:

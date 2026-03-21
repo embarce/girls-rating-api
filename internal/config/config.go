@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -9,16 +10,19 @@ import (
 
 // Config 应用配置结构
 type Config struct {
-	App   AppConfig
-	MySQL MySQLConfig
-	Redis RedisConfig
-	JWT   JWTConfig
+	App    AppConfig
+	MySQL  MySQLConfig
+	Redis  RedisConfig
+	JWT    JWTConfig
+	Cache  CacheConfig
+	Random RandomConfig
 }
 
 // AppConfig 服务器配置
 type AppConfig struct {
-	Port string
-	Env  string
+	Port           string
+	Env            string
+	TrustedProxies []string // 用于 Gin SetTrustedProxies，逗号分隔配置项：GIN_TRUSTED_PROXIES
 }
 
 // MySQLConfig 数据库配置
@@ -45,6 +49,24 @@ type JWTConfig struct {
 	Issuer string
 }
 
+// CacheConfig 缓存配置
+type CacheConfig struct {
+	// PaginationTTL 分页接口缓存 TTL
+	PaginationTTL time.Duration
+}
+
+// RandomConfig 随机接口缓存配置
+type RandomConfig struct {
+	// PoolSize 随机池大小（Redis 中预存多少条数据）
+	PoolSize int
+	// RefreshInterval 池刷新间隔
+	RefreshInterval time.Duration
+	// PoolLockTTL 刷新锁 TTL
+	PoolLockTTL time.Duration
+	// PoolSetKey Redis Set key（存储 JSON 序列化后的 ImageResourceRow）
+	PoolSetKey string
+}
+
 // Load 加载配置文件
 func Load() (*Config, error) {
 	// 设置配置名称和路径
@@ -65,8 +87,9 @@ func Load() (*Config, error) {
 
 	config := &Config{
 		App: AppConfig{
-			Port: getEnv("APP_PORT", "8080"),
-			Env:  getEnv("APP_ENV", "development"),
+			Port:           getEnv("APP_PORT", "8080"),
+			Env:            getEnv("APP_ENV", "development"),
+			TrustedProxies: parseCSV(getEnv("GIN_TRUSTED_PROXIES", "")),
 		},
 		MySQL: MySQLConfig{
 			Host:     getEnv("MYSQL_HOST", "localhost"),
@@ -86,6 +109,15 @@ func Load() (*Config, error) {
 			Expire: time.Duration(viper.GetInt("JWT_EXPIRE")) * time.Hour,
 			Issuer: getEnv("JWT_ISSUER", "girls-rating-api"),
 		},
+		Cache: CacheConfig{
+			PaginationTTL: time.Duration(viper.GetInt("PAGE_CACHE_TTL_SECONDS")) * time.Second,
+		},
+		Random: RandomConfig{
+			PoolSize:        viper.GetInt("RANDOM_POOL_SIZE"),
+			RefreshInterval: time.Duration(viper.GetInt("RANDOM_POOL_REFRESH_SECONDS")) * time.Second,
+			PoolLockTTL:     time.Duration(viper.GetInt("RANDOM_POOL_LOCK_SECONDS")) * time.Second,
+			PoolSetKey:      getEnv("RANDOM_POOL_SET_KEY", "cache:random_pool:v1:set"),
+		},
 	}
 
 	// 设置默认值
@@ -94,6 +126,19 @@ func Load() (*Config, error) {
 	}
 	if config.JWT.Expire == 0 {
 		config.JWT.Expire = 24 * time.Hour
+	}
+	if config.Cache.PaginationTTL == 0 {
+		config.Cache.PaginationTTL = 5 * time.Minute
+	}
+	if config.Random.PoolSize == 0 {
+		// 默认预存 2 万条数据（按你库的实际规模可调）
+		config.Random.PoolSize = 20000
+	}
+	if config.Random.RefreshInterval == 0 {
+		config.Random.RefreshInterval = 1 * time.Hour
+	}
+	if config.Random.PoolLockTTL == 0 {
+		config.Random.PoolLockTTL = 5 * time.Minute
 	}
 
 	return config, nil
@@ -106,6 +151,26 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// parseCSV 将形如 "a,b,c"（可带空格）解析成 []string{"a","b","c"}。
+// 空字符串返回空切片。
+func parseCSV(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // MySQLDSN 获取 MySQL DSN 连接字符串
