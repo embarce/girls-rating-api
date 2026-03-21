@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"girls-rating-api/internal/models"
@@ -15,14 +16,15 @@ import (
 
 // ImageResourceService 图片资源服务
 type ImageResourceService struct {
-	repo *repository.ImageResourceRepository
-	rdb  *rediscache.Client
-	ttl  time.Duration
+	repo   *repository.ImageResourceRepository
+	rdb    *rediscache.Client
+	ttl    time.Duration
+	s3Host string
 }
 
 // NewImageResourceService 创建图片资源服务
-func NewImageResourceService(repo *repository.ImageResourceRepository, rdb *rediscache.Client, ttl time.Duration) *ImageResourceService {
-	return &ImageResourceService{repo: repo, rdb: rdb, ttl: ttl}
+func NewImageResourceService(repo *repository.ImageResourceRepository, rdb *rediscache.Client, ttl time.Duration, s3Host string) *ImageResourceService {
+	return &ImageResourceService{repo: repo, rdb: rdb, ttl: ttl, s3Host: s3Host}
 }
 
 // ListInput 分页查询输入
@@ -66,4 +68,15 @@ func (s *ImageResourceService) List(ctx context.Context, input ListInput) (*repo
 	}
 
 	return result, nil
+}
+
+// BuildS3URL 如果 s3Host 不为空，则将资源路径拼接为完整 URL；否则直接返回原路径
+func (s *ImageResourceService) BuildS3URL(resourceURL string) string {
+	if s.s3Host == "" {
+		return resourceURL
+	}
+	// 避免双斜杠问题：s3Host 可能以 / 结尾，resourceURL 可能以 / 开头
+	s3Host := strings.TrimSuffix(s.s3Host, "/")
+	resourceURL = strings.TrimPrefix(resourceURL, "/")
+	return s3Host + "/" + resourceURL
 }

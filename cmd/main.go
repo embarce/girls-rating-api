@@ -84,11 +84,11 @@ func main() {
 
 	// 初始化随机图片资源服务
 	randomRepo := repository.NewRandomRepository(db)
-	randomService := service.NewRandomService(randomRepo, rdb, cfg.Random)
+	randomService := service.NewRandomService(randomRepo, rdb, cfg.Random, cfg.App.S3Host)
 
 	// 初始化图片资源服务
 	imageResourceRepo := repository.NewImageResourceRepository(db)
-	imageResourceService := service.NewImageResourceService(imageResourceRepo, rdb, cfg.Cache.PaginationTTL)
+	imageResourceService := service.NewImageResourceService(imageResourceRepo, rdb, cfg.Cache.PaginationTTL, cfg.App.S3Host)
 
 	// 创建并启动服务器
 	server := apiHandlers.NewServer(userService, randomService, imageResourceService, jwtService, cfg.App.TrustedProxies)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"girls-rating-api/internal/config"
@@ -39,9 +40,10 @@ type RandomService struct {
 	refreshInterval time.Duration
 	poolLockTTL     time.Duration
 	poolSetKey      string
+	s3Host          string
 }
 
-func NewRandomService(repo *repository.RandomRepository, rdb *rediscache.Client, cfg config.RandomConfig) *RandomService {
+func NewRandomService(repo *repository.RandomRepository, rdb *rediscache.Client, cfg config.RandomConfig, s3Host string) *RandomService {
 	s := &RandomService{
 		repo:            repo,
 		rdb:             rdb,
@@ -49,6 +51,7 @@ func NewRandomService(repo *repository.RandomRepository, rdb *rediscache.Client,
 		refreshInterval: cfg.RefreshInterval,
 		poolLockTTL:     cfg.PoolLockTTL,
 		poolSetKey:      cfg.PoolSetKey,
+		s3Host:          s3Host,
 	}
 
 	// 启动时先尝试刷新一次，保证后续请求能直接从 Redis 抽。
@@ -77,7 +80,7 @@ func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]Rando
 
 		items := make([]RandomItemResponse, 0, len(rows))
 		for _, r := range rows {
-			items = append(items, toRandomItemResponse(r))
+			items = append(items, toRandomItemResponse(r, s.s3Host))
 		}
 		return items, nil
 	}
@@ -92,7 +95,7 @@ func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]Rando
 		}
 		items := make([]RandomItemResponse, 0, len(rows))
 		for _, r := range rows {
-			items = append(items, toRandomItemResponse(r))
+			items = append(items, toRandomItemResponse(r, s.s3Host))
 		}
 		return items, nil
 	}
@@ -109,7 +112,7 @@ func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]Rando
 		if err := json.Unmarshal([]byte(m), &row); err != nil {
 			continue
 		}
-		items = append(items, toRandomItemResponse(row))
+		items = append(items, toRandomItemResponse(row, s.s3Host))
 	}
 	return items, nil
 }
@@ -198,16 +201,27 @@ func (s *RandomService) refreshLoop() {
 	}
 }
 
-func toRandomItemResponse(r models.ImageResourceRow) RandomItemResponse {
+func toRandomItemResponse(r models.ImageResourceRow, s3Host string) RandomItemResponse {
 	return RandomItemResponse{
-		ResourceURL: r.ResourceURL,
+		ResourceURL: buildS3URL(r.ResourceURL, s3Host),
 		Width:       r.Width,
 		Height:      r.Height,
 		Rating:      r.Rating,
 		Views:       r.Views,
 		Author: AuthorResponse{
 			Name:   "Embrace",
-			Avatar: "http://localhost:3000/images/avatars/avatar1.webp",
+			Avatar: "https://www.girls-rating.com/images/avatars/avatar1.webp",
 		},
 	}
+}
+
+// buildS3URL 如果 s3Host 不为空，则将资源路径拼接为完整 URL；否则直接返回原路径
+func buildS3URL(resourceURL, s3Host string) string {
+	if s3Host == "" {
+		return resourceURL
+	}
+	// 避免双斜杠问题：s3Host 可能以 / 结尾，resourceURL 可能以 / 开头
+	s3Host = strings.TrimSuffix(s3Host, "/")
+	resourceURL = strings.TrimPrefix(resourceURL, "/")
+	return s3Host + "/" + resourceURL
 }

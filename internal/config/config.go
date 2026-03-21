@@ -23,6 +23,7 @@ type AppConfig struct {
 	Port           string
 	Env            string
 	TrustedProxies []string // 用于 Gin SetTrustedProxies，逗号分隔配置项：GIN_TRUSTED_PROXIES
+	S3Host         string   // S3 图片资源 host，如 https://static.girls-rating.com
 }
 
 // MySQLConfig 数据库配置
@@ -90,6 +91,7 @@ func Load() (*Config, error) {
 			Port:           getEnv("APP_PORT", "8080"),
 			Env:            getEnv("APP_ENV", "development"),
 			TrustedProxies: parseCSV(getEnv("GIN_TRUSTED_PROXIES", "")),
+			S3Host:         getEnv("S3_HOST", ""),
 		},
 		MySQL: MySQLConfig{
 			Host:     getEnv("MYSQL_HOST", "localhost"),

@@ -78,14 +78,14 @@ func (s *Server) Cosplay(c *gin.Context) {
 	for _, item := range result.List {
 		list = append(list, CosplayItemResponse{
 			ID:          fmt.Sprintf("%d", item.ID),
-			ResourceURL: item.ResourceURL,
+			ResourceURL: s.ImageResourceService.BuildS3URL(item.ResourceURL),
 			Width:       item.Width,
 			Height:      item.Height,
 			Rating:      int(item.Rating),
 			Views:       item.Views,
 			Author: AuthorResponse{
 				Name:   "Embrace",
-				Avatar: "http://localhost:3000/images/avatars/avatar1.webp",
+				Avatar: "https://www.girls-rating.com/images/avatars/avatar1.webp",
 			},
 		})
 	}
