@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strings"
 
 	"girls-rating-api/internal/config"
 
@@ -16,9 +15,8 @@ import (
 
 // Client Cloudflare R2 客户端（S3 兼容）
 type Client struct {
-	s3Client  *s3.Client
-	bucket    string
-	publicURL string
+	s3Client *s3.Client
+	bucket   string
 }
 
 // New 创建 R2 客户端
@@ -39,12 +37,9 @@ func New(cfg config.R2Config) (*Client, error) {
 		o.BaseEndpoint = aws.String(cfg.Endpoint())
 	})
 
-	publicURL := strings.TrimSuffix(cfg.PublicURL, "/")
-
 	return &Client{
-		s3Client:  s3Client,
-		bucket:    cfg.Bucket,
-		publicURL: publicURL,
+		s3Client: s3Client,
+		bucket:   cfg.Bucket,
 	}, nil
 }
 
@@ -52,7 +47,7 @@ func New(cfg config.R2Config) (*Client, error) {
 // key: 对象 key，如 "images/2024/01/01/1234567890_abc.jpg"
 // contentType: MIME 类型，如 "image/jpeg"
 // body: 文件内容
-// 返回公开访问 URL
+// 返回对象 key（相对路径），由调用方决定是否拼接公开 URL
 func (c *Client) Upload(ctx context.Context, key string, contentType string, body io.Reader) (string, error) {
 	_, err := c.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(c.bucket),
@@ -64,9 +59,5 @@ func (c *Client) Upload(ctx context.Context, key string, contentType string, bod
 		return "", fmt.Errorf("failed to upload to r2: %w", err)
 	}
 
-	// 返回公开 URL
-	if c.publicURL != "" {
-		return c.publicURL + "/" + key, nil
-	}
 	return key, nil
 }

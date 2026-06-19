@@ -10,6 +10,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"log"
 	"math/rand"
 	"path/filepath"
 	"strings"
@@ -67,10 +68,13 @@ func (s *UploadService) Upload(ctx context.Context, input UploadInput) (*models.
 	width := input.Width
 	height := input.Height
 	if width == 0 || height == 0 {
-		cfg, _, decodeErr := image.DecodeConfig(bytes.NewReader(data))
-		if decodeErr == nil {
+		cfg, format, decodeErr := image.DecodeConfig(bytes.NewReader(data))
+		if decodeErr != nil {
+			log.Printf("[upload] image.DecodeConfig failed (format=%q, size=%d): %v", format, len(data), decodeErr)
+		} else {
 			width = cfg.Width
 			height = cfg.Height
+			log.Printf("[upload] detected image dimensions: %dx%d (format=%q)", width, height, format)
 		}
 	}
 
@@ -101,16 +105,20 @@ func (s *UploadService) Upload(ctx context.Context, input UploadInput) (*models.
 	if views == "" {
 		views = "1k"
 	}
+	authorID := input.AuthorID
+	if authorID == 0 {
+		authorID = 1
+	}
 
-	// 保存数据库记录
+	// 保存数据库记录（resource_url 存相对路径，查询时由 BuildS3URL 拼接完整 URL）
 	resource := &models.ImageResource{
 		ID:          snowflake.Generate(),
-		CreateBy:    fmt.Sprintf("%d", input.AuthorID),
+		CreateBy:    "Embrace",
 		CreateTime:  now,
 		ResourceURL: resourceURL,
 		Width:       width,
 		Height:      height,
-		AuthorID:    input.AuthorID,
+		AuthorID:    authorID,
 		Rating:      rating,
 		Views:       views,
 	}
