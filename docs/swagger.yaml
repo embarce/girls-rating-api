@@ -113,6 +113,30 @@ definitions:
       msg:
         type: string
     type: object
+  handlers.UploadImageResponse:
+    properties:
+      code:
+        type: integer
+      data:
+        $ref: '#/definitions/handlers.UploadImageResponseData'
+      msg:
+        type: string
+    type: object
+  handlers.UploadImageResponseData:
+    properties:
+      height:
+        type: integer
+      id:
+        type: string
+      rating:
+        type: number
+      resourceUrl:
+        type: string
+      views:
+        type: string
+      width:
+        type: integer
+    type: object
   response.APIResponse:
     properties:
       code:
@@ -291,6 +315,65 @@ paths:
       summary: 用户注册
       tags:
       - 用户认证
+  /api/v1/upload/image:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传图片文件到 Cloudflare R2，同时在数据库中创建图片资源记录。此接口使用固定 API Key 认证，供维护脚本调用。
+      parameters:
+      - description: 图片文件 (JPEG/PNG/WebP/GIF)
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: 评分 (默认 4.0)
+        in: formData
+        name: rating
+        type: number
+      - description: 浏览量 (默认 '1k')
+        in: formData
+        name: views
+        type: string
+      - description: 作者 ID
+        in: formData
+        name: author_id
+        type: integer
+      - description: 宽度 (默认自动检测)
+        in: formData
+        name: width
+        type: integer
+      - description: 高度 (默认自动检测)
+        in: formData
+        name: height
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.UploadImageResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: 未授权：缺少或无效的 X-API-Key
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: 禁止：未配置上传 API Key
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 上传图片到 R2 并创建图片资源
+      tags:
+      - 图片资源
   /api/v1/user:
     get:
       description: 获取当前登录用户的详细信息
@@ -335,6 +418,11 @@ schemes:
 - http
 - https
 securityDefinitions:
+  ApiKeyAuth:
+    description: 固定 API Key，用于维护脚本调用上传接口
+    in: header
+    name: X-API-Key
+    type: apiKey
   BearerAuth:
     description: 使用 JWT token，格式：Bearer {token}
     in: header

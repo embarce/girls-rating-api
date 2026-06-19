@@ -9,6 +9,7 @@ import (
 	"girls-rating-api/internal/repository"
 	"girls-rating-api/internal/service"
 	"girls-rating-api/pkg/jwt"
+	"girls-rating-api/pkg/r2"
 	redisClient "girls-rating-api/pkg/redis"
 
 	"github.com/gin-gonic/gin"
@@ -37,6 +38,11 @@ import (
 // @in header
 // @name Authorization
 // @description 使用 JWT token，格式：Bearer {token}
+
+// @securityDefinitions.apikey  ApiKeyAuth
+// @in header
+// @name X-API-Key
+// @description 固定 API Key，用于维护脚本调用上传接口
 
 func main() {
 	// 加载配置
@@ -90,8 +96,15 @@ func main() {
 	imageResourceRepo := repository.NewImageResourceRepository(db)
 	imageResourceService := service.NewImageResourceService(imageResourceRepo, rdb, cfg.Cache.PaginationTTL, cfg.App.S3Host)
 
+	// 初始化 R2 客户端和上传服务
+	r2Client, err := r2.New(cfg.R2)
+	if err != nil {
+		log.Fatalf("Failed to initialize R2 client: %v", err)
+	}
+	uploadService := service.NewUploadService(r2Client, imageResourceRepo, rdb, cfg.Random.PoolSetKey, cfg.App.S3Host)
+
 	// 创建并启动服务器
-	server := apiHandlers.NewServer(userService, randomService, imageResourceService, jwtService, cfg.App.TrustedProxies)
+	server := apiHandlers.NewServer(userService, randomService, imageResourceService, uploadService, jwtService, cfg.App.TrustedProxies, cfg.App.UploadAPIKey)
 
 	log.Printf("Starting server on port %s", cfg.App.Port)
 	if err := server.Run(cfg.App.Port); err != nil {

@@ -21,7 +21,11 @@
       "Bash(go build -o bin/app ./cmd/main.go)",
       "Bash(swag init -g cmd/main.go)",
       "Bash(timeout 5 go run cmd/main.go)",
-      "Bash(go vet ./...)"
+      "Bash(go vet ./...)",
+      "Bash(go get *)",
+      "Bash(go build *)",
+      "Bash(~/go/bin/swag init *)",
+      "Bash(python3 *)"
     ]
   }
 }

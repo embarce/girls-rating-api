@@ -196,6 +196,97 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/upload/image": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "上传图片文件到 Cloudflare R2，同时在数据库中创建图片资源记录。此接口使用固定 API Key 认证，供维护脚本调用。",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "图片资源"
+                ],
+                "summary": "上传图片到 R2 并创建图片资源",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "图片文件 (JPEG/PNG/WebP/GIF)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "number",
+                        "description": "评分 (默认 4.0)",
+                        "name": "rating",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "浏览量 (默认 '1k')",
+                        "name": "views",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "作者 ID",
+                        "name": "author_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "宽度 (默认自动检测)",
+                        "name": "width",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "高度 (默认自动检测)",
+                        "name": "height",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.UploadImageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权：缺少或无效的 X-API-Key",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "禁止：未配置上传 API Key",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/user": {
             "get": {
                 "security": [
@@ -432,6 +523,43 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.UploadImageResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "data": {
+                    "$ref": "#/definitions/handlers.UploadImageResponseData"
+                },
+                "msg": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.UploadImageResponseData": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "rating": {
+                    "type": "number"
+                },
+                "resourceUrl": {
+                    "type": "string"
+                },
+                "views": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
         "response.APIResponse": {
             "type": "object",
             "properties": {
@@ -511,6 +639,12 @@ const docTemplate = `{
         }
     },
     "securityDefinitions": {
+        "ApiKeyAuth": {
+            "description": "固定 API Key，用于维护脚本调用上传接口",
+            "type": "apiKey",
+            "name": "X-API-Key",
+            "in": "header"
+        },
         "BearerAuth": {
             "description": "使用 JWT token，格式：Bearer {token}",
             "type": "apiKey",

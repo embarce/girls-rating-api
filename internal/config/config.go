@@ -16,6 +16,7 @@ type Config struct {
 	JWT    JWTConfig
 	Cache  CacheConfig
 	Random RandomConfig
+	R2     R2Config
 }
 
 // AppConfig 服务器配置
@@ -24,6 +25,7 @@ type AppConfig struct {
 	Env            string
 	TrustedProxies []string // 用于 Gin SetTrustedProxies，逗号分隔配置项：GIN_TRUSTED_PROXIES
 	S3Host         string   // S3 图片资源 host，如 https://static.girls-rating.com
+	UploadAPIKey   string   // 上传接口固定 API Key，通过 X-API-Key 请求头传递
 }
 
 // MySQLConfig 数据库配置
@@ -54,6 +56,15 @@ type JWTConfig struct {
 type CacheConfig struct {
 	// PaginationTTL 分页接口缓存 TTL
 	PaginationTTL time.Duration
+}
+
+// R2Config Cloudflare R2 配置（S3 兼容）
+type R2Config struct {
+	AccountID string // Cloudflare 账户 ID
+	AccessKey string // R2 Access Key ID
+	SecretKey string // R2 Secret Access Key
+	Bucket    string // R2 Bucket 名称
+	PublicURL string // 公开访问 URL，复用 S3_HOST
 }
 
 // RandomConfig 随机接口缓存配置
@@ -92,6 +103,7 @@ func Load() (*Config, error) {
 			Env:            getEnv("APP_ENV", "development"),
 			TrustedProxies: parseCSV(getEnv("GIN_TRUSTED_PROXIES", "")),
 			S3Host:         getEnv("S3_HOST", ""),
+			UploadAPIKey:   getEnv("UPLOAD_API_KEY", ""),
 		},
 		MySQL: MySQLConfig{
 			Host:     getEnv("MYSQL_HOST", "localhost"),
@@ -119,6 +131,13 @@ func Load() (*Config, error) {
 			RefreshInterval: time.Duration(viper.GetInt("RANDOM_POOL_REFRESH_SECONDS")) * time.Second,
 			PoolLockTTL:     time.Duration(viper.GetInt("RANDOM_POOL_LOCK_SECONDS")) * time.Second,
 			PoolSetKey:      getEnv("RANDOM_POOL_SET_KEY", "cache:random_pool:v1:set"),
+		},
+		R2: R2Config{
+			AccountID: getEnv("R2_ACCOUNT_ID", ""),
+			AccessKey: getEnv("R2_ACCESS_KEY", ""),
+			SecretKey: getEnv("R2_SECRET_KEY", ""),
+			Bucket:    getEnv("R2_BUCKET", ""),
+			PublicURL: getEnv("S3_HOST", ""),
 		},
 	}
 
@@ -189,4 +208,9 @@ func (c *MySQLConfig) DSN() string {
 // RedisAddr 获取 Redis 地址
 func (c *RedisConfig) Addr() string {
 	return fmt.Sprintf("%s:%s", c.Host, c.Port)
+}
+
+// Endpoint 获取 R2 S3 兼容 endpoint
+func (c *R2Config) Endpoint() string {
+	return fmt.Sprintf("https://%s.r2.cloudflarestorage.com", c.AccountID)
 }

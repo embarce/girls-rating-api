@@ -16,17 +16,21 @@ type Server struct {
 	UserService          *service.UserService
 	RandomService        *service.RandomService
 	ImageResourceService *service.ImageResourceService
+	UploadService        *service.UploadService
 	JWTService           *jwt.Service
+	uploadAPIKey         string
 }
 
 // NewServer 创建服务器
-func NewServer(userService *service.UserService, randomService *service.RandomService, imageResourceService *service.ImageResourceService, jwtService *jwt.Service, trustedProxies []string) *Server {
+func NewServer(userService *service.UserService, randomService *service.RandomService, imageResourceService *service.ImageResourceService, uploadService *service.UploadService, jwtService *jwt.Service, trustedProxies []string, uploadAPIKey string) *Server {
 	server := &Server{
 		Engine:               gin.Default(),
 		UserService:          userService,
 		RandomService:        randomService,
 		ImageResourceService: imageResourceService,
+		UploadService:        uploadService,
 		JWTService:           jwtService,
+		uploadAPIKey:         uploadAPIKey,
 	}
 
 	// 设置受信任的代理。
@@ -58,11 +62,18 @@ func (s *Server) setupRouter() {
 			public.POST("/login", s.Login)
 		}
 
-		// 需要认证的路由
+		// 需要 JWT 认证的路由
 		protected := v1.Group("")
 		protected.Use(middleware.Auth(s.JWTService))
 		{
 			protected.GET("/user", s.GetProfile)
+		}
+
+		// 上传路由（固定 API Key 认证，供维护脚本使用）
+		upload := v1.Group("/upload")
+		upload.Use(middleware.APIKeyAuth(s.uploadAPIKey))
+		{
+			upload.POST("/image", s.UploadImage)
 		}
 	}
 

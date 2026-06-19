@@ -30,6 +30,11 @@ type ListResult[T any] struct {
 	Total int64 `json:"total"`
 }
 
+// Create 创建图片资源记录
+func (r *ImageResourceRepository) Create(ctx context.Context, resource *models.ImageResource) error {
+	return r.db.WithContext(ctx).Create(resource).Error
+}
+
 // List 分页查询图片资源，按创建时间倒序
 func (r *ImageResourceRepository) List(ctx context.Context, input ListInput) (*ListResult[models.ImageResource], error) {
 	offset := (input.Page - 1) * input.PageSize
