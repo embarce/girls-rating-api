@@ -15,6 +15,7 @@ type ImageResource struct {
 	AuthorID    int64     `gorm:"column:author_id;default:null;comment:'作者'" json:"author_id"`
 	Rating      float64   `gorm:"column:rating;type:decimal(10,1);not null;default:4.0;comment:'评分'" json:"rating"`
 	Views       string    `gorm:"column:views;type:varchar(255);not null;default:'1k';comment:'浏览量'" json:"views"`
+	Rarity      int8      `gorm:"column:rarity;not null;default:0;comment:'卡片等级 0=R 1=SR 2=SSR'" json:"rarity"`
 }
 
 // TableName 指定表名
@@ -22,12 +23,23 @@ func (ImageResource) TableName() string {
 	return "tb_girls_rating_image_resource"
 }
 
-// ImageResourceRow 用于从 tb_girls_rating_image_resource 扫描的字段结果。
-// 注意：该结构不包含业务外键/关联，仅服务于 /api/random 的响应拼装。
-type ImageResourceRow struct {
-	ResourceURL string `gorm:"column:resource_url"`
-	Width       int    `gorm:"column:width"`
-	Height      int    `gorm:"column:height"`
-	Rating      int    `gorm:"column:rating"`
-	Views       string `gorm:"column:views"`
+// Rarity 卡片等级常量：上传时定档（或按 rating 派生），读取永不派生。
+// 权威定义见 docs/design/photo-system.md §四。
+const (
+	RarityR   int8 = 0
+	RaritySR  int8 = 1
+	RaritySSR int8 = 2
+)
+
+// PhotoRow 池成员结构（Redis Set 成员的 JSON 序列化对象）。
+// 注意：结构升级时必须 bump 池 key 版本（v1 缺 rarity/authorId 字段，混池会产生
+// 「全部 R 档 + 默认作者」的脏数据），见 docs/design/photo-system.md §4.2。
+type PhotoRow struct {
+	ResourceURL string  `json:"resourceUrl"`
+	Width       int     `json:"width"`
+	Height      int     `json:"height"`
+	Rating      float64 `json:"rating"`
+	Views       string  `json:"views"`
+	Rarity      int8    `json:"rarity"`
+	AuthorID    int64   `json:"authorId"` // 响应期解析作者，池里不冗余 name/avatar
 }

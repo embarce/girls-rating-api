@@ -11,30 +11,14 @@ import (
 
 // RandomAPIResponse 统一 API 响应结构
 type RandomAPIResponse struct {
-	Msg  string                       `json:"msg"`
-	Code int                          `json:"code"`
-	Data []service.RandomItemResponse `json:"data"`
-}
-
-// RandomItemResponse 单条随机图片资源响应
-type RandomItemResponse struct {
-	ResourceURL string         `json:"resourceUrl"`
-	Width       int            `json:"width"`
-	Height      int            `json:"height"`
-	Rating      int            `json:"rating"`
-	Views       string         `json:"views"`
-	Author      AuthorResponse `json:"author"`
-}
-
-// AuthorResponse 作者信息
-type AuthorResponse struct {
-	Name   string `json:"name"`
-	Avatar string `json:"avatar"`
+	Msg  string                  `json:"msg"`
+	Code int                     `json:"code"`
+	Data []service.PhotoResponse `json:"data"`
 }
 
 // Random 返回随机图片资源（公开接口，不需要 JWT）
 // @Summary      获取随机图片资源
-// @Description  随机返回图片资源列表，无需认证
+// @Description  随机返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors 表），无需认证
 // @Tags         图片资源
 // @Produce      json
 // @Success      200  {object}  RandomAPIResponse

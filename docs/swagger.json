@@ -24,7 +24,7 @@
     "paths": {
         "/api/cosplay": {
             "get": {
-                "description": "按时间倒序分页返回图片资源列表",
+                "description": "按时间倒序分页返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors 表）；author_id 传入时按作者过滤（作者专区）",
                 "produces": [
                     "application/json"
                 ],
@@ -46,6 +46,13 @@
                         "description": "每页数量",
                         "name": "pageSize",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "format": "int64",
+                        "description": "作者 ID（authors.id，过滤该作者作品）",
+                        "name": "author_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -64,9 +71,146 @@
                 }
             }
         },
+        "/api/gacha/collection": {
+            "get": {
+                "description": "全部快照按时间倒序展开，应用层切片分页；每张卡带 drawDate",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "抽卡"
+                ],
+                "summary": "卡册分页（按设备）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备标识",
+                        "name": "X-Device-Id",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码，从 1 开始",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "每页数量",
+                        "name": "pageSize",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { list, total, page, pageSize, stats }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "缺少 X-Device-Id",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/gacha/draw": {
+            "post": {
+                "description": "每台设备每天一次、固定 10 张；当天已抽时补发当日快照（replayed=true），不返回 409。请求头携带 X-Device-Id",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "抽卡"
+                ],
+                "summary": "每日抽卡（幂等补发）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备标识（前端 crypto.randomUUID() 生成并持久化）",
+                        "name": "X-Device-Id",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { date, replayed, cards, stats }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "缺少 X-Device-Id",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误（池空/存储失败）",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/gacha/status": {
+            "get": {
+                "description": "前端开屏调用：drawnToday=false 且当日未弹过 → 每日弹窗；drawnToday=true → 抽卡页直接进展示态",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "抽卡"
+                ],
+                "summary": "抽卡状态（今日能否抽 + 公示概率 + 累计统计）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "设备标识",
+                        "name": "X-Device-Id",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { date, drawnToday, cards, probabilities, stats, pool }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "缺少 X-Device-Id",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/random": {
             "get": {
-                "description": "随机返回图片资源列表，无需认证",
+                "description": "随机返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors 表），无需认证",
                 "produces": [
                     "application/json"
                 ],
@@ -90,9 +234,425 @@
                 }
             }
         },
+        "/api/v1/admin/authors": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "name 精确匹配（命中返回单条，供爬虫先查后建）；keyword 模糊分页列表",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-作者"
+                ],
+                "summary": "作者列表（作者存在性检查入口）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "精确匹配作者名（存在性检查）",
+                        "name": "name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "模糊匹配作者名",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码，从 1 开始",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "pageSize",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { list: [Author], total }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权：缺少或无效的 X-API-Key",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "禁止：未配置 API Key",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "name 已存在时返回 200 + 既有记录 + existed:true；新建返回 201。爬虫崩溃重试不会产生重复",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-作者"
+                ],
+                "summary": "创建作者（幂等）",
+                "parameters": [
+                    {
+                        "description": "作者信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AdminAuthorCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { author, existed:true }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "201": {
+                        "description": "data: { author, existed:false }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "禁止",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/authors/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "不存在或已软删返回 404",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-作者"
+                ],
+                "summary": "作者详情",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "作者 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { author }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "作者不存在",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "同事务把 name 改写为 \"{name}#del#{id}\" 释放唯一槽位，允许重建同名；响应带 affectedImages 计数",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-作者"
+                ],
+                "summary": "删除作者（软删除）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "作者 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { affectedImages }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "作者不存在",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "改名撞唯一索引返回 409",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-作者"
+                ],
+                "summary": "更新作者",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "作者 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新内容（nil 字段跳过）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AdminAuthorUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { author }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "作者不存在",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "名称冲突",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/authors/{id}/avatar": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "multipart 头像文件 → R2 avatars/ 前缀 → 更新 URL + 失效作者缓存",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-作者"
+                ],
+                "summary": "上传作者头像",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "作者 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "头像文件 (JPEG/PNG/WebP/GIF)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: { author }",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "作者不存在",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/images/{id}": {
+            "patch": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "改 rating/rarity/views/author_id：重算定档落库、清分页缓存、同步随机池与抽卡池",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "管理端-图片"
+                ],
+                "summary": "修改图片资源（重算定档）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "图片 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "更新内容（nil 字段跳过）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AdminImageUpdateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: PhotoResponse",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "未授权",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "图片不存在",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/login": {
             "post": {
-                "description": "使用用户名和密码登录，返回 JWT token",
+                "description": "使用用户名和密码登录，返回 JWT token；服务端配置 TURNSTILE_SECRET_KEY 后需携带 X-Turnstile-Token（人机验证）",
                 "consumes": [
                     "application/json"
                 ],
@@ -104,6 +664,12 @@
                 ],
                 "summary": "用户登录",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Turnstile 人机验证 token（启用时必填）",
+                        "name": "X-Turnstile-Token",
+                        "in": "header"
+                    },
                     {
                         "description": "登录信息",
                         "name": "request",
@@ -133,6 +699,12 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
+                    "403": {
+                        "description": "人机验证失败或缺 token",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "服务器错误",
                         "schema": {
@@ -142,9 +714,73 @@
                 }
             }
         },
+        "/api/v1/mail/contact": {
+            "post": {
+                "description": "将用户反馈转发到支持邮箱（MAIL_CONTACT_TO），Reply-To 指向用户邮箱。请求头携带 X-Turnstile-Token（服务端启用人机验证时必填）",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "邮件"
+                ],
+                "summary": "用户反馈邮件（Resend 中继）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Turnstile 人机验证 token（启用时必填）",
+                        "name": "X-Turnstile-Token",
+                        "in": "header"
+                    },
+                    {
+                        "description": "反馈内容",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MailContactRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "data: {}",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "人机验证失败",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Resend 上游错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "邮件未配置",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/register": {
             "post": {
-                "description": "创建新用户账号",
+                "description": "创建新用户账号；服务端配置 TURNSTILE_SECRET_KEY 后需携带 X-Turnstile-Token（人机验证）",
                 "consumes": [
                     "application/json"
                 ],
@@ -156,6 +792,12 @@
                 ],
                 "summary": "用户注册",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Turnstile 人机验证 token（启用时必填）",
+                        "name": "X-Turnstile-Token",
+                        "in": "header"
+                    },
                     {
                         "description": "注册信息",
                         "name": "request",
@@ -175,6 +817,12 @@
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "人机验证失败或缺 token",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -201,7 +849,7 @@
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "上传图片文件到 Cloudflare R2，同时在数据库中创建图片资源记录。此接口使用固定 API Key 认证，供维护脚本调用。",
+                "description": "上传图片文件到 Cloudflare R2，同时在数据库中创建图片资源记录。此接口使用固定 API Key 认证，供维护脚本调用。rarity 显式定档优先，缺省按 rating 阈值派生（\u003e=9 SSR / \u003e=7 SR）；作者优先级 author_id \u003e author_name(find-or-create) \u003e 默认作者",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -234,8 +882,26 @@
                     },
                     {
                         "type": "integer",
-                        "description": "作者 ID",
+                        "description": "作者 ID（无效值回退默认作者）",
                         "name": "author_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "作者名（find-or-create 兜底通道，优先级低于 author_id）",
+                        "name": "author_name",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "作者头像外链（配合 author_name 创建时使用）",
+                        "name": "author_avatar",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "卡片等级显式定档：0/1/2 或 R/SR/SSR（缺省按 rating 派生）",
+                        "name": "rarity",
                         "in": "formData"
                     },
                     {
@@ -253,9 +919,9 @@
                 ],
                 "responses": {
                     "201": {
-                        "description": "Created",
+                        "description": "data: UploadImageResponseData",
                         "schema": {
-                            "$ref": "#/definitions/handlers.UploadImageResponse"
+                            "$ref": "#/definitions/response.APIResponse"
                         }
                     },
                     "400": {
@@ -350,7 +1016,21 @@
         }
     },
     "definitions": {
-        "handlers.AuthorResponse": {
+        "handlers.AdminAuthorCreateRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "avatar": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.AdminAuthorUpdateRequest": {
             "type": "object",
             "properties": {
                 "avatar": {
@@ -361,29 +1041,21 @@
                 }
             }
         },
-        "handlers.CosplayItemResponse": {
+        "handlers.AdminImageUpdateRequest": {
             "type": "object",
             "properties": {
-                "author": {
-                    "$ref": "#/definitions/handlers.AuthorResponse"
-                },
-                "height": {
+                "author_id": {
                     "type": "integer"
                 },
-                "id": {
-                    "type": "string"
+                "rarity": {
+                    "description": "0=R 1=SR 2=SSR；nil 且 rating 有变时按新 rating 派生",
+                    "type": "integer"
                 },
                 "rating": {
-                    "type": "integer"
-                },
-                "resourceUrl": {
-                    "type": "string"
+                    "type": "number"
                 },
                 "views": {
                     "type": "string"
-                },
-                "width": {
-                    "type": "integer"
                 }
             }
         },
@@ -410,7 +1082,7 @@
                 "list": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/handlers.CosplayItemResponse"
+                        "$ref": "#/definitions/service.PhotoResponse"
                     }
                 },
                 "pageSize": {
@@ -468,6 +1140,24 @@
                 }
             }
         },
+        "handlers.MailContactRequest": {
+            "type": "object",
+            "required": [
+                "email",
+                "message"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.RandomAPIResponse": {
             "type": "object",
             "properties": {
@@ -477,7 +1167,7 @@
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/service.RandomItemResponse"
+                        "$ref": "#/definitions/service.PhotoResponse"
                     }
                 },
                 "msg": {
@@ -521,43 +1211,6 @@
                 }
             }
         },
-        "handlers.UploadImageResponse": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "integer"
-                },
-                "data": {
-                    "$ref": "#/definitions/handlers.UploadImageResponseData"
-                },
-                "msg": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.UploadImageResponseData": {
-            "type": "object",
-            "properties": {
-                "height": {
-                    "type": "integer"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "rating": {
-                    "type": "number"
-                },
-                "resourceUrl": {
-                    "type": "string"
-                },
-                "views": {
-                    "type": "string"
-                },
-                "width": {
-                    "type": "integer"
-                }
-            }
-        },
         "response.APIResponse": {
             "type": "object",
             "properties": {
@@ -577,13 +1230,15 @@
                 "avatar": {
                     "type": "string"
                 },
+                "id": {
+                    "type": "integer"
+                },
                 "name": {
                     "type": "string"
                 }
             }
         },
-        "service.RandomItemResponse": {
-            "description": "随机图片资源项",
+        "service.PhotoResponse": {
             "type": "object",
             "properties": {
                 "author": {
@@ -592,8 +1247,16 @@
                 "height": {
                     "type": "integer"
                 },
+                "id": {
+                    "description": "random 池无 id 时省略",
+                    "type": "string"
+                },
+                "rarity": {
+                    "description": "\"R\" | \"SR\" | \"SSR\"",
+                    "type": "string"
+                },
                 "rating": {
-                    "type": "integer"
+                    "type": "number"
                 },
                 "resourceUrl": {
                     "type": "string"

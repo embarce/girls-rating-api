@@ -19,44 +19,48 @@ func NewRandomRepository(db *gorm.DB) *RandomRepository {
 
 // GetPoolResources 从 tb_girls_rating_image_resource 预取一批数据到 Redis 池。
 // 注意：这里不使用 ORDER BY RAND()，避免在“刷新池”这一步也造成高开销。
-func (r *RandomRepository) GetPoolResources(ctx context.Context, limit int) ([]models.ImageResourceRow, error) {
+func (r *RandomRepository) GetPoolResources(ctx context.Context, limit int) ([]models.PhotoRow, error) {
 	const query = `
 SELECT
   COALESCE(resource_url,'') AS resource_url,
   COALESCE(width,0) AS width,
   COALESCE(height,0) AS height,
-  CAST(rating AS UNSIGNED) AS rating,
-  COALESCE(views,'') AS views
+  COALESCE(rating,0) AS rating,
+  COALESCE(views,'') AS views,
+  COALESCE(rarity,0) AS rarity,
+  COALESCE(author_id,1) AS author_id
 FROM tb_girls_rating_image_resource
 ORDER BY create_time DESC
 LIMIT ?
 `
 
-	rows := make([]models.ImageResourceRow, 0, limit)
+	rows := make([]models.PhotoRow, 0, limit)
 	if err := r.db.WithContext(ctx).Raw(query, limit).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
 }
 
-// GetRandomResources 从 tb_girls_rating_image_resource 随机取数据。
-func (r *RandomRepository) GetRandomResources(ctx context.Context, limit int) ([]models.ImageResourceRow, error) {
+// GetRandomResources 从 tb_girls_rating_image_resource 随机取数据（Redis 不可用时的兜底）。
+func (r *RandomRepository) GetRandomResources(ctx context.Context, limit int) ([]models.PhotoRow, error) {
 	// 说明：
 	// - ORDER BY RAND() 属于随机排序的通用实现，但大数据量时会慢；本接口为第一版，后续可以再优化。
-	// - 使用 COALESCE/CAST，避免 NULL 或 decimal 导致 JSON 结构与前端期望不一致。
+	// - 使用 COALESCE，避免 NULL 导致 JSON 结构与前端期望不一致。
 	const query = `
 SELECT
   COALESCE(resource_url,'') AS resource_url,
   COALESCE(width,0) AS width,
   COALESCE(height,0) AS height,
-  CAST(rating AS UNSIGNED) AS rating,
-  COALESCE(views,'') AS views
+  COALESCE(rating,0) AS rating,
+  COALESCE(views,'') AS views,
+  COALESCE(rarity,0) AS rarity,
+  COALESCE(author_id,1) AS author_id
 FROM tb_girls_rating_image_resource
 ORDER BY RAND()
 LIMIT ?
 `
 
-	rows := make([]models.ImageResourceRow, 0, limit)
+	rows := make([]models.PhotoRow, 0, limit)
 	if err := r.db.WithContext(ctx).Raw(query, limit).Scan(&rows).Error; err != nil {
 		return nil, err
 	}

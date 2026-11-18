@@ -1,28 +1,32 @@
 basePath: /
 definitions:
-  handlers.AuthorResponse:
+  handlers.AdminAuthorCreateRequest:
+    properties:
+      avatar:
+        type: string
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  handlers.AdminAuthorUpdateRequest:
     properties:
       avatar:
         type: string
       name:
         type: string
     type: object
-  handlers.CosplayItemResponse:
+  handlers.AdminImageUpdateRequest:
     properties:
-      author:
-        $ref: '#/definitions/handlers.AuthorResponse'
-      height:
+      author_id:
         type: integer
-      id:
-        type: string
+      rarity:
+        description: 0=R 1=SR 2=SSR；nil 且 rating 有变时按新 rating 派生
+        type: integer
       rating:
-        type: integer
-      resourceUrl:
-        type: string
+        type: number
       views:
         type: string
-      width:
-        type: integer
     type: object
   handlers.CosplayListResponse:
     properties:
@@ -39,7 +43,7 @@ definitions:
         type: integer
       list:
         items:
-          $ref: '#/definitions/handlers.CosplayItemResponse'
+          $ref: '#/definitions/service.PhotoResponse'
         type: array
       pageSize:
         type: integer
@@ -77,13 +81,25 @@ definitions:
       msg:
         type: string
     type: object
+  handlers.MailContactRequest:
+    properties:
+      email:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+    required:
+    - email
+    - message
+    type: object
   handlers.RandomAPIResponse:
     properties:
       code:
         type: integer
       data:
         items:
-          $ref: '#/definitions/service.RandomItemResponse'
+          $ref: '#/definitions/service.PhotoResponse'
         type: array
       msg:
         type: string
@@ -113,30 +129,6 @@ definitions:
       msg:
         type: string
     type: object
-  handlers.UploadImageResponse:
-    properties:
-      code:
-        type: integer
-      data:
-        $ref: '#/definitions/handlers.UploadImageResponseData'
-      msg:
-        type: string
-    type: object
-  handlers.UploadImageResponseData:
-    properties:
-      height:
-        type: integer
-      id:
-        type: string
-      rating:
-        type: number
-      resourceUrl:
-        type: string
-      views:
-        type: string
-      width:
-        type: integer
-    type: object
   response.APIResponse:
     properties:
       code:
@@ -150,18 +142,25 @@ definitions:
     properties:
       avatar:
         type: string
+      id:
+        type: integer
       name:
         type: string
     type: object
-  service.RandomItemResponse:
-    description: 随机图片资源项
+  service.PhotoResponse:
     properties:
       author:
         $ref: '#/definitions/service.AuthorResponse'
       height:
         type: integer
+      id:
+        description: random 池无 id 时省略
+        type: string
+      rarity:
+        description: '"R" | "SR" | "SSR"'
+        type: string
       rating:
-        type: integer
+        type: number
       resourceUrl:
         type: string
       views:
@@ -204,7 +203,8 @@ info:
 paths:
   /api/cosplay:
     get:
-      description: 按时间倒序分页返回图片资源列表
+      description: 按时间倒序分页返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors
+        表）；author_id 传入时按作者过滤（作者专区）
       parameters:
       - default: 1
         description: 页码，从 1 开始
@@ -215,6 +215,11 @@ paths:
         description: 每页数量
         in: query
         name: pageSize
+        type: integer
+      - description: 作者 ID（authors.id，过滤该作者作品）
+        format: int64
+        in: query
+        name: author_id
         type: integer
       produces:
       - application/json
@@ -230,9 +235,102 @@ paths:
       summary: 分页查询 Cosplay 图片资源
       tags:
       - 图片资源
+  /api/gacha/collection:
+    get:
+      description: 全部快照按时间倒序展开，应用层切片分页；每张卡带 drawDate
+      parameters:
+      - description: 设备标识
+        in: header
+        name: X-Device-Id
+        required: true
+        type: string
+      - default: 1
+        description: 页码，从 1 开始
+        in: query
+        name: page
+        type: integer
+      - default: 30
+        description: 每页数量
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { list, total, page, pageSize, stats }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 缺少 X-Device-Id
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: 卡册分页（按设备）
+      tags:
+      - 抽卡
+  /api/gacha/draw:
+    post:
+      description: 每台设备每天一次、固定 10 张；当天已抽时补发当日快照（replayed=true），不返回 409。请求头携带 X-Device-Id
+      parameters:
+      - description: 设备标识（前端 crypto.randomUUID() 生成并持久化）
+        in: header
+        name: X-Device-Id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { date, replayed, cards, stats }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 缺少 X-Device-Id
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "500":
+          description: 服务器错误（池空/存储失败）
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: 每日抽卡（幂等补发）
+      tags:
+      - 抽卡
+  /api/gacha/status:
+    get:
+      description: 前端开屏调用：drawnToday=false 且当日未弹过 → 每日弹窗；drawnToday=true → 抽卡页直接进展示态
+      parameters:
+      - description: 设备标识
+        in: header
+        name: X-Device-Id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { date, drawnToday, cards, probabilities, stats, pool
+            }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 缺少 X-Device-Id
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: 抽卡状态（今日能否抽 + 公示概率 + 累计统计）
+      tags:
+      - 抽卡
   /api/random:
     get:
-      description: 随机返回图片资源列表，无需认证
+      description: 随机返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors
+        表），无需认证
       produces:
       - application/json
       responses:
@@ -247,12 +345,284 @@ paths:
       summary: 获取随机图片资源
       tags:
       - 图片资源
+  /api/v1/admin/authors:
+    get:
+      description: name 精确匹配（命中返回单条，供爬虫先查后建）；keyword 模糊分页列表
+      parameters:
+      - description: 精确匹配作者名（存在性检查）
+        in: query
+        name: name
+        type: string
+      - description: 模糊匹配作者名
+        in: query
+        name: keyword
+        type: string
+      - default: 1
+        description: 页码，从 1 开始
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量
+        in: query
+        name: pageSize
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { list: [Author], total }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权：缺少或无效的 X-API-Key
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "403":
+          description: 禁止：未配置 API Key
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 作者列表（作者存在性检查入口）
+      tags:
+      - 管理端-作者
+    post:
+      consumes:
+      - application/json
+      description: name 已存在时返回 200 + 既有记录 + existed:true；新建返回 201。爬虫崩溃重试不会产生重复
+      parameters:
+      - description: 作者信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AdminAuthorCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { author, existed:true }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "201":
+          description: 'data: { author, existed:false }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "403":
+          description: 禁止
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 创建作者（幂等）
+      tags:
+      - 管理端-作者
+  /api/v1/admin/authors/{id}:
+    delete:
+      description: 同事务把 name 改写为 "{name}#del#{id}" 释放唯一槽位，允许重建同名；响应带 affectedImages
+        计数
+      parameters:
+      - description: 作者 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { affectedImages }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: 作者不存在
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 删除作者（软删除）
+      tags:
+      - 管理端-作者
+    get:
+      description: 不存在或已软删返回 404
+      parameters:
+      - description: 作者 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { author }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: 作者不存在
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 作者详情
+      tags:
+      - 管理端-作者
+    patch:
+      consumes:
+      - application/json
+      description: 改名撞唯一索引返回 409
+      parameters:
+      - description: 作者 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新内容（nil 字段跳过）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AdminAuthorUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { author }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: 作者不存在
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "409":
+          description: 名称冲突
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 更新作者
+      tags:
+      - 管理端-作者
+  /api/v1/admin/authors/{id}/avatar:
+    post:
+      consumes:
+      - multipart/form-data
+      description: multipart 头像文件 → R2 avatars/ 前缀 → 更新 URL + 失效作者缓存
+      parameters:
+      - description: 作者 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 头像文件 (JPEG/PNG/WebP/GIF)
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: { author }'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: 作者不存在
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 上传作者头像
+      tags:
+      - 管理端-作者
+  /api/v1/admin/images/{id}:
+    patch:
+      consumes:
+      - application/json
+      description: 改 rating/rarity/views/author_id：重算定档落库、清分页缓存、同步随机池与抽卡池
+      parameters:
+      - description: 图片 ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 更新内容（nil 字段跳过）
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AdminImageUpdateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: PhotoResponse'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "401":
+          description: 未授权
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "404":
+          description: 图片不存在
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      security:
+      - ApiKeyAuth: []
+      summary: 修改图片资源（重算定档）
+      tags:
+      - 管理端-图片
   /api/v1/login:
     post:
       consumes:
       - application/json
-      description: 使用用户名和密码登录，返回 JWT token
+      description: 使用用户名和密码登录，返回 JWT token；服务端配置 TURNSTILE_SECRET_KEY 后需携带 X-Turnstile-Token（人机验证）
       parameters:
+      - description: Turnstile 人机验证 token（启用时必填）
+        in: header
+        name: X-Turnstile-Token
+        type: string
       - description: 登录信息
         in: body
         name: request
@@ -274,6 +644,10 @@ paths:
           description: 用户名或密码错误
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: 人机验证失败或缺 token
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: 服务器错误
           schema:
@@ -281,12 +655,58 @@ paths:
       summary: 用户登录
       tags:
       - 用户认证
+  /api/v1/mail/contact:
+    post:
+      consumes:
+      - application/json
+      description: 将用户反馈转发到支持邮箱（MAIL_CONTACT_TO），Reply-To 指向用户邮箱。请求头携带 X-Turnstile-Token（服务端启用人机验证时必填）
+      parameters:
+      - description: Turnstile 人机验证 token（启用时必填）
+        in: header
+        name: X-Turnstile-Token
+        type: string
+      - description: 反馈内容
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.MailContactRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 'data: {}'
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "403":
+          description: 人机验证失败
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "502":
+          description: Resend 上游错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+        "503":
+          description: 邮件未配置
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: 用户反馈邮件（Resend 中继）
+      tags:
+      - 邮件
   /api/v1/register:
     post:
       consumes:
       - application/json
-      description: 创建新用户账号
+      description: 创建新用户账号；服务端配置 TURNSTILE_SECRET_KEY 后需携带 X-Turnstile-Token（人机验证）
       parameters:
+      - description: Turnstile 人机验证 token（启用时必填）
+        in: header
+        name: X-Turnstile-Token
+        type: string
       - description: 注册信息
         in: body
         name: request
@@ -304,6 +724,10 @@ paths:
           description: 请求参数错误
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: 人机验证失败或缺 token
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "409":
           description: 用户名或邮箱已存在
           schema:
@@ -319,7 +743,9 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: 上传图片文件到 Cloudflare R2，同时在数据库中创建图片资源记录。此接口使用固定 API Key 认证，供维护脚本调用。
+      description: 上传图片文件到 Cloudflare R2，同时在数据库中创建图片资源记录。此接口使用固定 API Key 认证，供维护脚本调用。rarity
+        显式定档优先，缺省按 rating 阈值派生（>=9 SSR / >=7 SR）；作者优先级 author_id > author_name(find-or-create)
+        > 默认作者
       parameters:
       - description: 图片文件 (JPEG/PNG/WebP/GIF)
         in: formData
@@ -334,10 +760,22 @@ paths:
         in: formData
         name: views
         type: string
-      - description: 作者 ID
+      - description: 作者 ID（无效值回退默认作者）
         in: formData
         name: author_id
         type: integer
+      - description: 作者名（find-or-create 兜底通道，优先级低于 author_id）
+        in: formData
+        name: author_name
+        type: string
+      - description: 作者头像外链（配合 author_name 创建时使用）
+        in: formData
+        name: author_avatar
+        type: string
+      - description: 卡片等级显式定档：0/1/2 或 R/SR/SSR（缺省按 rating 派生）
+        in: formData
+        name: rarity
+        type: string
       - description: 宽度 (默认自动检测)
         in: formData
         name: width
@@ -350,9 +788,9 @@ paths:
       - application/json
       responses:
         "201":
-          description: Created
+          description: 'data: UploadImageResponseData'
           schema:
-            $ref: '#/definitions/handlers.UploadImageResponse'
+            $ref: '#/definitions/response.APIResponse'
         "400":
           description: 请求参数错误
           schema:

@@ -45,13 +45,15 @@ type ErrorResponse struct {
 
 // Register 用户注册
 // @Summary      用户注册
-// @Description  创建新用户账号
+// @Description  创建新用户账号；服务端配置 TURNSTILE_SECRET_KEY 后需携带 X-Turnstile-Token（人机验证）
 // @Tags         用户认证
 // @Accept       json
 // @Produce      json
-// @Param        request  body      RegisterRequest  true  "注册信息"
+// @Param        X-Turnstile-Token  header  string            false "Turnstile 人机验证 token（启用时必填）"
+// @Param        request            body    RegisterRequest   true  "注册信息"
 // @Success      201      {object}  RegisterResponse
 // @Failure      400      {object}  ErrorResponse  "请求参数错误"
+// @Failure      403      {object}  ErrorResponse  "人机验证失败或缺 token"
 // @Failure      409      {object}  ErrorResponse  "用户名或邮箱已存在"
 // @Failure      500      {object}  ErrorResponse  "服务器错误"
 // @Router       /api/v1/register [post]
@@ -83,14 +85,16 @@ func (s *Server) Register(c *gin.Context) {
 
 // Login 用户登录
 // @Summary      用户登录
-// @Description  使用用户名和密码登录，返回 JWT token
+// @Description  使用用户名和密码登录，返回 JWT token；服务端配置 TURNSTILE_SECRET_KEY 后需携带 X-Turnstile-Token（人机验证）
 // @Tags         用户认证
 // @Accept       json
 // @Produce      json
-// @Param        request  body      LoginRequest  true  "登录信息"
+// @Param        X-Turnstile-Token  header  string          false "Turnstile 人机验证 token（启用时必填）"
+// @Param        request            body    LoginRequest    true  "登录信息"
 // @Success      200      {object}  LoginResponse
 // @Failure      400      {object}  ErrorResponse  "请求参数错误"
 // @Failure      401      {object}  ErrorResponse  "用户名或密码错误"
+// @Failure      403      {object}  ErrorResponse  "人机验证失败或缺 token"
 // @Failure      500      {object}  ErrorResponse  "服务器错误"
 // @Router       /api/v1/login [post]
 func (s *Server) Login(c *gin.Context) {

@@ -39,6 +39,8 @@ func NewMySQL(cfg config.MySQLConfig) (*gorm.DB, error) {
 func AutoMigrate(db *gorm.DB) error {
 	models := []interface{}{
 		&models.User{},
+		&models.Author{},
+		&models.GachaDraw{},
 		// 后续添加其他模型
 	}
 

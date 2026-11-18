@@ -22,6 +22,7 @@ func NewImageResourceRepository(db *gorm.DB) *ImageResourceRepository {
 type ListInput struct {
 	Page     int
 	PageSize int
+	AuthorID int64 // 可选，>0 时按作者过滤（作者专区）
 }
 
 // ListResult 分页查询结果
@@ -35,19 +36,38 @@ func (r *ImageResourceRepository) Create(ctx context.Context, resource *models.I
 	return r.db.WithContext(ctx).Create(resource).Error
 }
 
-// List 分页查询图片资源，按创建时间倒序
+// GetByID 按 id 查询图片资源。未命中返回 gorm.ErrRecordNotFound。
+func (r *ImageResourceRepository) GetByID(ctx context.Context, id int64) (*models.ImageResource, error) {
+	var resource models.ImageResource
+	if err := r.db.WithContext(ctx).First(&resource, id).Error; err != nil {
+		return nil, err
+	}
+	return &resource, nil
+}
+
+// Save 更新图片资源记录
+func (r *ImageResourceRepository) Save(ctx context.Context, resource *models.ImageResource) error {
+	return r.db.WithContext(ctx).Save(resource).Error
+}
+
+// List 分页查询图片资源，按创建时间倒序；AuthorID > 0 时按作者过滤
 func (r *ImageResourceRepository) List(ctx context.Context, input ListInput) (*ListResult[models.ImageResource], error) {
 	offset := (input.Page - 1) * input.PageSize
 
+	scope := r.db.WithContext(ctx).Model(&models.ImageResource{})
+	if input.AuthorID > 0 {
+		scope = scope.Where("author_id = ?", input.AuthorID)
+	}
+
 	// 查询总数
 	var total int64
-	if err := r.db.WithContext(ctx).Model(&models.ImageResource{}).Count(&total).Error; err != nil {
+	if err := scope.Count(&total).Error; err != nil {
 		return nil, err
 	}
 
 	// 分页查询
 	var list []models.ImageResource
-	err := r.db.WithContext(ctx).
+	err := scope.
 		Offset(offset).
 		Limit(input.PageSize).
 		Order("create_time DESC").

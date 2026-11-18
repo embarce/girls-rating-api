@@ -10,13 +10,17 @@ import (
 
 // Config 应用配置结构
 type Config struct {
-	App    AppConfig
-	MySQL  MySQLConfig
-	Redis  RedisConfig
-	JWT    JWTConfig
-	Cache  CacheConfig
-	Random RandomConfig
-	R2     R2Config
+	App       AppConfig
+	MySQL     MySQLConfig
+	Redis     RedisConfig
+	JWT       JWTConfig
+	Cache     CacheConfig
+	Random    RandomConfig
+	Photo     PhotoConfig
+	Gacha     GachaConfig
+	Turnstile TurnstileConfig
+	Mail      MailConfig
+	R2        R2Config
 }
 
 // AppConfig 服务器配置
@@ -75,8 +79,55 @@ type RandomConfig struct {
 	RefreshInterval time.Duration
 	// PoolLockTTL 刷新锁 TTL
 	PoolLockTTL time.Duration
-	// PoolSetKey Redis Set key（存储 JSON 序列化后的 ImageResourceRow）
+	// PoolSetKey Redis Set key（存储 JSON 序列化后的 PhotoRow）
+	// 结构升级时必须 bump 版本（如 v1 → v2），避免新旧 JSON 混池。
 	PoolSetKey string
+}
+
+// PhotoConfig 照片领域配置（评分定档阈值权威默认值见 docs/design/photo-system.md §四）
+type PhotoConfig struct {
+	// SSRMinRating rating >= 此值派生为 SSR（与 002 迁移回填 SQL 同源）
+	SSRMinRating float64
+	// SRMinRating rating >= 此值派生为 SR
+	SRMinRating float64
+	// DefaultAuthorID 默认作者 id（seed 的 id=1），作者解析 miss 时回退
+	DefaultAuthorID int64
+}
+
+// GachaConfig 抽卡配置（docs/design/gacha-system.md §四.3）
+type GachaConfig struct {
+	// DrawSize 每日一抽固定张数（拍板固定 10）
+	DrawSize int
+	// SSRWeight / SRWeight / RWeight 固定权重（先掷档、再从档内池取图）
+	SSRWeight float64
+	SRWeight  float64
+	RWeight   float64
+	// Timezone draw_date 按此时区取服务器日期
+	Timezone string
+	// PoolSize 每档抽卡池上限
+	PoolSize int
+	// RefreshInterval 池刷新间隔
+	RefreshInterval time.Duration
+	// PoolLockTTL 刷新锁 TTL
+	PoolLockTTL time.Duration
+	// PoolSetKeyPrefix 抽卡池 key 前缀，实际 key 为 {prefix}:{ssr|sr|r}
+	PoolSetKeyPrefix string
+}
+
+// TurnstileConfig Cloudflare Turnstile 人机验证。
+// SecretKey 为空表示未启用：抽卡接口跳过验证，保持向后兼容。
+type TurnstileConfig struct {
+	SecretKey string // TURNSTILE_SECRET_KEY
+	VerifyURL string // siteverify 接口地址
+}
+
+// MailConfig Resend 邮件发送（https://resend.com）。
+// ResendAPIKey 为空表示未配置；反馈中继额外要求 ContactTo（收件邮箱）。
+type MailConfig struct {
+	ResendAPIKey string // RESEND_API_KEY
+	From         string // 发件人，"Name <addr>" 或纯地址，需为 Resend 已验证域名
+	ContactTo    string // 反馈中继收件邮箱（MAIL_CONTACT_TO，支持团队收件箱）
+	APIURL       string // Resend 发信接口地址
 }
 
 // Load 加载配置文件
@@ -130,7 +181,34 @@ func Load() (*Config, error) {
 			PoolSize:        viper.GetInt("RANDOM_POOL_SIZE"),
 			RefreshInterval: time.Duration(viper.GetInt("RANDOM_POOL_REFRESH_SECONDS")) * time.Second,
 			PoolLockTTL:     time.Duration(viper.GetInt("RANDOM_POOL_LOCK_SECONDS")) * time.Second,
-			PoolSetKey:      getEnv("RANDOM_POOL_SET_KEY", "cache:random_pool:v1:set"),
+			// v2：池成员结构升级为 PhotoRow（含 rarity/authorId），旧 v1 key 弃用
+			PoolSetKey: getEnv("RANDOM_POOL_SET_KEY", "cache:random_pool:v2:set"),
+		},
+		Photo: PhotoConfig{
+			SSRMinRating:    viper.GetFloat64("PHOTO_SSR_MIN_RATING"),
+			SRMinRating:     viper.GetFloat64("PHOTO_SR_MIN_RATING"),
+			DefaultAuthorID: int64(viper.GetInt("PHOTO_DEFAULT_AUTHOR_ID")),
+		},
+		Gacha: GachaConfig{
+			DrawSize:         viper.GetInt("GACHA_DRAW_SIZE"),
+			SSRWeight:        viper.GetFloat64("GACHA_SSR_WEIGHT"),
+			SRWeight:         viper.GetFloat64("GACHA_SR_WEIGHT"),
+			RWeight:          viper.GetFloat64("GACHA_R_WEIGHT"),
+			Timezone:         getEnv("GACHA_TIMEZONE", "Asia/Shanghai"),
+			PoolSize:         viper.GetInt("GACHA_POOL_SIZE"),
+			RefreshInterval:  time.Duration(viper.GetInt("GACHA_POOL_REFRESH_SECONDS")) * time.Second,
+			PoolLockTTL:      time.Duration(viper.GetInt("GACHA_POOL_LOCK_SECONDS")) * time.Second,
+			PoolSetKeyPrefix: getEnv("GACHA_POOL_SET_KEY_PREFIX", "cache:gacha_pool:v2"),
+		},
+		Turnstile: TurnstileConfig{
+			SecretKey: getEnv("TURNSTILE_SECRET_KEY", ""),
+			VerifyURL: getEnv("TURNSTILE_VERIFY_URL", "https://challenges.cloudflare.com/turnstile/v0/siteverify"),
+		},
+		Mail: MailConfig{
+			ResendAPIKey: getEnv("RESEND_API_KEY", ""),
+			From:         getEnv("MAIL_FROM", ""),
+			ContactTo:    getEnv("MAIL_CONTACT_TO", ""),
+			APIURL:       getEnv("RESEND_API_URL", "https://api.resend.com/emails"),
 		},
 		R2: R2Config{
 			AccountID: getEnv("R2_ACCOUNT_ID", ""),
@@ -160,6 +238,40 @@ func Load() (*Config, error) {
 	}
 	if config.Random.PoolLockTTL == 0 {
 		config.Random.PoolLockTTL = 5 * time.Minute
+	}
+	if config.Photo.SSRMinRating == 0 {
+		config.Photo.SSRMinRating = 9.0
+	}
+	if config.Photo.SRMinRating == 0 {
+		config.Photo.SRMinRating = 7.0
+	}
+	if config.Photo.DefaultAuthorID == 0 {
+		config.Photo.DefaultAuthorID = 1
+	}
+	if config.Gacha.DrawSize == 0 {
+		config.Gacha.DrawSize = 10
+	}
+	if config.Gacha.SSRWeight == 0 {
+		config.Gacha.SSRWeight = 6
+	}
+	if config.Gacha.SRWeight == 0 {
+		config.Gacha.SRWeight = 24
+	}
+	if config.Gacha.RWeight == 0 {
+		config.Gacha.RWeight = 70
+	}
+	if _, err := time.LoadLocation(config.Gacha.Timezone); err != nil {
+		// 时区名非法时回退默认值，避免 draw_date 计算 panic
+		config.Gacha.Timezone = "Asia/Shanghai"
+	}
+	if config.Gacha.PoolSize == 0 {
+		config.Gacha.PoolSize = 500
+	}
+	if config.Gacha.RefreshInterval == 0 {
+		config.Gacha.RefreshInterval = 1 * time.Hour
+	}
+	if config.Gacha.PoolLockTTL == 0 {
+		config.Gacha.PoolLockTTL = 5 * time.Minute
 	}
 
 	return config, nil

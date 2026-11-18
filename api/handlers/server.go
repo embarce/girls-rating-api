@@ -17,18 +17,26 @@ type Server struct {
 	RandomService        *service.RandomService
 	ImageResourceService *service.ImageResourceService
 	UploadService        *service.UploadService
+	AuthorService        *service.AuthorService
+	GachaService         *service.GachaService
+	TurnstileService     *service.TurnstileService
+	MailService          *service.MailService
 	JWTService           *jwt.Service
 	uploadAPIKey         string
 }
 
 // NewServer 创建服务器
-func NewServer(userService *service.UserService, randomService *service.RandomService, imageResourceService *service.ImageResourceService, uploadService *service.UploadService, jwtService *jwt.Service, trustedProxies []string, uploadAPIKey string) *Server {
+func NewServer(userService *service.UserService, randomService *service.RandomService, imageResourceService *service.ImageResourceService, uploadService *service.UploadService, authorService *service.AuthorService, gachaService *service.GachaService, turnstileService *service.TurnstileService, mailService *service.MailService, jwtService *jwt.Service, trustedProxies []string, uploadAPIKey string) *Server {
 	server := &Server{
 		Engine:               gin.Default(),
 		UserService:          userService,
 		RandomService:        randomService,
 		ImageResourceService: imageResourceService,
 		UploadService:        uploadService,
+		AuthorService:        authorService,
+		GachaService:         gachaService,
+		TurnstileService:     turnstileService,
+		MailService:          mailService,
 		JWTService:           jwtService,
 		uploadAPIKey:         uploadAPIKey,
 	}
@@ -52,14 +60,30 @@ func (s *Server) setupRouter() {
 	// 图片资源分页查询接口（公开，不走 JWT）
 	s.Engine.GET("/api/cosplay", s.Cosplay)
 
+	// 抽卡接口（公开，不走 JWT，匿名 X-Device-Id 标识设备）
+	gacha := s.Engine.Group("/api/gacha")
+	{
+		gacha.POST("/draw", s.GachaDraw)
+		gacha.GET("/status", s.GachaStatus)
+		gacha.GET("/collection", s.GachaCollection)
+	}
+
 	// API v1 路由组
 	v1 := s.Engine.Group("/api/v1")
 	{
-		// 公开路由
+		// 公开路由（注册/登录受 Turnstile 人机验证保护；未配置 secret 时中间件直接放行）
 		public := v1.Group("")
+		public.Use(middleware.Turnstile(s.TurnstileService))
 		{
 			public.POST("/register", s.Register)
 			public.POST("/login", s.Login)
+		}
+
+		// 邮件反馈（公开 + Turnstile 人机验证，经 Resend 中继到支持邮箱）
+		mail := v1.Group("/mail")
+		mail.Use(middleware.Turnstile(s.TurnstileService))
+		{
+			mail.POST("/contact", s.MailContact)
 		}
 
 		// 需要 JWT 认证的路由
@@ -74,6 +98,19 @@ func (s *Server) setupRouter() {
 		upload.Use(middleware.APIKeyAuth(s.uploadAPIKey))
 		{
 			upload.POST("/image", s.UploadImage)
+		}
+
+		// 管理路由（固定 API Key 认证，与管理脚本同一信任域，面向爬虫自动化设计）
+		admin := v1.Group("/admin")
+		admin.Use(middleware.APIKeyAuth(s.uploadAPIKey))
+		{
+			admin.GET("/authors", s.AdminAuthors)
+			admin.POST("/authors", s.AdminAuthorCreate)
+			admin.GET("/authors/:id", s.AdminAuthorGet)
+			admin.PATCH("/authors/:id", s.AdminAuthorUpdate)
+			admin.DELETE("/authors/:id", s.AdminAuthorDelete)
+			admin.POST("/authors/:id/avatar", s.AdminAuthorAvatar)
+			admin.PATCH("/images/:id", s.AdminImageUpdate)
 		}
 	}
 

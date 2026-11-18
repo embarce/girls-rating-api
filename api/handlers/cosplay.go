@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 
@@ -20,74 +19,48 @@ type CosplayListResponse struct {
 
 // CosplayListResponseData 分页数据
 type CosplayListResponseData struct {
-	TotalCount int64                 `json:"totalCount"`
-	TotalPage  int64                 `json:"totalPage"`
-	PageSize   int                   `json:"pageSize"`
-	CurrPage   int                   `json:"currPage"`
-	List       []CosplayItemResponse `json:"list"`
-}
-
-// CosplayItemResponse 单条 Cosplay 图片资源响应
-type CosplayItemResponse struct {
-	ID          string         `json:"id"`
-	ResourceURL string         `json:"resourceUrl"`
-	Width       int            `json:"width"`
-	Height      int            `json:"height"`
-	Rating      int            `json:"rating"`
-	Views       string         `json:"views"`
-	Author      AuthorResponse `json:"author"`
+	TotalCount int64                   `json:"totalCount"`
+	TotalPage  int64                   `json:"totalPage"`
+	PageSize   int                     `json:"pageSize"`
+	CurrPage   int                     `json:"currPage"`
+	List       []service.PhotoResponse `json:"list"`
 }
 
 // Cosplay 分页查询 Cosplay 图片资源
 // @Summary      分页查询 Cosplay 图片资源
-// @Description  按时间倒序分页返回图片资源列表
+// @Description  按时间倒序分页返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors 表）；author_id 传入时按作者过滤（作者专区）
 // @Tags         图片资源
 // @Produce      json
-// @Param        page     query     int  false  "页码，从 1 开始"  default(1)
-// @Param        pageSize query     int  false  "每页数量"  default(10)
+// @Param        page      query     int    false  "页码，从 1 开始"  default(1)
+// @Param        pageSize  query     int    false  "每页数量"  default(10)
+// @Param        author_id query     int64  false  "作者 ID（authors.id，过滤该作者作品）"
 // @Success      200      {object}  CosplayListResponse
 // @Failure      500      {object}  ErrorResponse  "服务器错误"
 // @Router       /api/cosplay [get]
 func (s *Server) Cosplay(c *gin.Context) {
 	// 解析分页参数
-	pageStr := c.DefaultQuery("page", "1")
-	pageSizeStr := c.DefaultQuery("pageSize", "10")
+	page, pageSize := parsePagination(c, 10)
 
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page < 1 {
-		page = 1
-	}
-
-	pageSize, err := strconv.Atoi(pageSizeStr)
-	if err != nil || pageSize < 1 || pageSize > 100 {
-		pageSize = 10
+	var authorID int64
+	if v := c.Query("author_id"); v != "" {
+		authorID, _ = strconv.ParseInt(v, 10, 64)
 	}
 
 	// 查询数据
 	result, err := s.ImageResourceService.List(c.Request.Context(), service.ListInput{
 		Page:     page,
 		PageSize: pageSize,
+		AuthorID: authorID,
 	})
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// 转换响应格式
-	list := make([]CosplayItemResponse, 0, len(result.List))
+	// 转换响应格式（统一 PhotoResponse，作者经作者服务解析）
+	list := make([]service.PhotoResponse, 0, len(result.List))
 	for _, item := range result.List {
-		list = append(list, CosplayItemResponse{
-			ID:          fmt.Sprintf("%d", item.ID),
-			ResourceURL: s.ImageResourceService.BuildS3URL(item.ResourceURL),
-			Width:       item.Width,
-			Height:      item.Height,
-			Rating:      int(item.Rating),
-			Views:       item.Views,
-			Author: AuthorResponse{
-				Name:   "Embrace",
-				Avatar: "https://www.girls-rating.com/images/avatars/avatar1.webp",
-			},
-		})
+		list = append(list, s.ImageResourceService.ToPhotoResponse(c.Request.Context(), item, true))
 	}
 
 	// 计算总页数

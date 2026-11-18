@@ -88,23 +88,35 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	userService := service.NewUserService(userRepo, jwtService)
 
+	// 初始化作者服务（作者实体 + 内存缓存，照片领域作者解析的统一入口）
+	authorRepo := repository.NewAuthorRepository(db)
+	authorService := service.NewAuthorService(authorRepo, cfg.Photo)
+
 	// 初始化随机图片资源服务
 	randomRepo := repository.NewRandomRepository(db)
-	randomService := service.NewRandomService(randomRepo, rdb, cfg.Random, cfg.App.S3Host)
+	randomService := service.NewRandomService(randomRepo, rdb, cfg.Random, cfg.App.S3Host, authorService)
 
 	// 初始化图片资源服务
 	imageResourceRepo := repository.NewImageResourceRepository(db)
-	imageResourceService := service.NewImageResourceService(imageResourceRepo, rdb, cfg.Cache.PaginationTTL, cfg.App.S3Host)
+	imageResourceService := service.NewImageResourceService(imageResourceRepo, rdb, authorService, cfg.Photo, cfg.Cache.PaginationTTL, cfg.App.S3Host)
+
+	// 初始化抽卡服务
+	gachaRepo := repository.NewGachaRepository(db)
+	gachaService := service.NewGachaService(gachaRepo, rdb, authorService, cfg.Gacha, cfg.App.S3Host)
+
+	// 初始化 Turnstile 人机验证与邮件服务（未配置 key 时各自降级为未启用）
+	turnstileService := service.NewTurnstileService(cfg.Turnstile)
+	mailService := service.NewMailService(cfg.Mail)
 
 	// 初始化 R2 客户端和上传服务
 	r2Client, err := r2.New(cfg.R2)
 	if err != nil {
 		log.Fatalf("Failed to initialize R2 client: %v", err)
 	}
-	uploadService := service.NewUploadService(r2Client, imageResourceRepo, rdb, cfg.Random.PoolSetKey, cfg.App.S3Host)
+	uploadService := service.NewUploadService(r2Client, imageResourceRepo, rdb, authorService, cfg.Photo, cfg.Random.PoolSetKey, cfg.App.S3Host)
 
 	// 创建并启动服务器
-	server := apiHandlers.NewServer(userService, randomService, imageResourceService, uploadService, jwtService, cfg.App.TrustedProxies, cfg.App.UploadAPIKey)
+	server := apiHandlers.NewServer(userService, randomService, imageResourceService, uploadService, authorService, gachaService, turnstileService, mailService, jwtService, cfg.App.TrustedProxies, cfg.App.UploadAPIKey)
 
 	log.Printf("Starting server on port %s", cfg.App.Port)
 	if err := server.Run(cfg.App.Port); err != nil {

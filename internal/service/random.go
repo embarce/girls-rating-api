@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"girls-rating-api/internal/config"
@@ -13,45 +12,29 @@ import (
 	rediscache "girls-rating-api/pkg/redis"
 )
 
-// AuthorResponse 返回给前端展示的作者信息（当前无业务含义，固定硬编码）。
-// @Description 作者信息
-type AuthorResponse struct {
-	Name   string `json:"name"`
-	Avatar string `json:"avatar"`
-}
-
-// RandomItemResponse 单条随机图片资源响应。
-// @Description 随机图片资源项
-type RandomItemResponse struct {
-	ResourceURL string         `json:"resourceUrl"`
-	Width       int            `json:"width"`
-	Height      int            `json:"height"`
-	Rating      int            `json:"rating"`
-	Views       string         `json:"views"`
-	Author      AuthorResponse `json:"author"`
-}
-
 // RandomService 随机图片资源服务。
 type RandomService struct {
-	repo *repository.RandomRepository
-	rdb  *rediscache.Client
+	repo     *repository.RandomRepository
+	rdb      *rediscache.Client
+	authors  *AuthorService
+	s3Host   string
+	poolSize int
 
-	poolSize        int
 	refreshInterval time.Duration
 	poolLockTTL     time.Duration
 	poolSetKey      string
-	s3Host          string
 }
 
-func NewRandomService(repo *repository.RandomRepository, rdb *rediscache.Client, cfg config.RandomConfig, s3Host string) *RandomService {
+func NewRandomService(repo *repository.RandomRepository, rdb *rediscache.Client, cfg config.RandomConfig, s3Host string, authors *AuthorService) *RandomService {
 	s := &RandomService{
 		repo:            repo,
 		rdb:             rdb,
+		authors:         authors,
+		s3Host:          s3Host,
 		poolSize:        cfg.PoolSize,
 		refreshInterval: cfg.RefreshInterval,
 		poolLockTTL:     cfg.PoolLockTTL,
 		poolSetKey:      cfg.PoolSetKey,
-		s3Host:          s3Host,
 	}
 
 	// 启动时先尝试刷新一次，保证后续请求能直接从 Redis 抽。
@@ -69,8 +52,8 @@ func NewRandomService(repo *repository.RandomRepository, rdb *rediscache.Client,
 	return s
 }
 
-// RandomResources 随机获取图片资源并组装返回结构。
-func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]RandomItemResponse, error) {
+// RandomResources 随机获取图片资源并组装返回结构（统一 PhotoResponse，含 rarity 与真实作者）。
+func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]PhotoResponse, error) {
 	// 如果 Redis 没配上，退回数据库 ORDER BY RAND() 的旧逻辑，保证功能不受影响。
 	if s.rdb == nil {
 		rows, err := s.repo.GetRandomResources(ctx, limit)
@@ -78,9 +61,9 @@ func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]Rando
 			return nil, err
 		}
 
-		items := make([]RandomItemResponse, 0, len(rows))
+		items := make([]PhotoResponse, 0, len(rows))
 		for _, r := range rows {
-			items = append(items, toRandomItemResponse(r, s.s3Host))
+			items = append(items, s.toPhotoResponse(ctx, r))
 		}
 		return items, nil
 	}
@@ -93,9 +76,9 @@ func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]Rando
 		if dbErr != nil {
 			return nil, err
 		}
-		items := make([]RandomItemResponse, 0, len(rows))
+		items := make([]PhotoResponse, 0, len(rows))
 		for _, r := range rows {
-			items = append(items, toRandomItemResponse(r, s.s3Host))
+			items = append(items, s.toPhotoResponse(ctx, r))
 		}
 		return items, nil
 	}
@@ -106,19 +89,19 @@ func (s *RandomService) RandomResources(ctx context.Context, limit int) ([]Rando
 		members, _ = s.rdb.SRandMemberN(ctx, s.poolSetKey, int64(limit)).Result()
 	}
 
-	items := make([]RandomItemResponse, 0, len(members))
+	items := make([]PhotoResponse, 0, len(members))
 	for _, m := range members {
-		var row models.ImageResourceRow
+		var row models.PhotoRow
 		if err := json.Unmarshal([]byte(m), &row); err != nil {
 			continue
 		}
-		items = append(items, toRandomItemResponse(row, s.s3Host))
+		items = append(items, s.toPhotoResponse(ctx, row))
 	}
 	return items, nil
 }
 
 // RefreshPool 刷新 Redis 随机池。
-// 使用 Set key：poolSetKey；成员值为 ImageResourceRow 的 JSON 字符串。
+// 使用 Set key：poolSetKey；成员值为 PhotoRow 的 JSON 字符串（v2 结构，含 rarity/authorId）。
 func (s *RandomService) RefreshPool(ctx context.Context) error {
 	if s.rdb == nil || s.poolSize <= 0 {
 		return nil
@@ -190,6 +173,19 @@ func (s *RandomService) RefreshPool(ctx context.Context) error {
 	return nil
 }
 
+// AddToPool 热加路径：新图片进随机池（PhotoRow v2）。
+// 改档/改作者后的旧成员由定时刷新 RENAME 全量替换兜底。
+func (s *RandomService) AddToPool(ctx context.Context, row models.PhotoRow) error {
+	if s.rdb == nil || s.poolSetKey == "" {
+		return nil
+	}
+	b, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	return s.rdb.SAdd(ctx, s.poolSetKey, string(b)).Err()
+}
+
 func (s *RandomService) refreshLoop() {
 	ticker := time.NewTicker(s.refreshInterval)
 	defer ticker.Stop()
@@ -201,27 +197,15 @@ func (s *RandomService) refreshLoop() {
 	}
 }
 
-func toRandomItemResponse(r models.ImageResourceRow, s3Host string) RandomItemResponse {
-	return RandomItemResponse{
-		ResourceURL: buildS3URL(r.ResourceURL, s3Host),
-		Width:       r.Width,
-		Height:      r.Height,
-		Rating:      r.Rating,
-		Views:       r.Views,
-		Author: AuthorResponse{
-			Name:   "Embrace",
-			Avatar: "https://www.girls-rating.com/images/avatars/avatar1.webp",
-		},
+// toPhotoResponse 池行 → 响应（rating 浮点、rarity 名、作者响应期解析）。
+func (s *RandomService) toPhotoResponse(ctx context.Context, row models.PhotoRow) PhotoResponse {
+	return PhotoResponse{
+		ResourceURL: buildS3URL(row.ResourceURL, s.s3Host),
+		Width:       row.Width,
+		Height:      row.Height,
+		Rating:      row.Rating,
+		Views:       row.Views,
+		Rarity:      RarityName(row.Rarity),
+		Author:      s.authors.Resolve(ctx, row.AuthorID),
 	}
-}
-
-// buildS3URL 如果 s3Host 不为空，则将资源路径拼接为完整 URL；否则直接返回原路径
-func buildS3URL(resourceURL, s3Host string) string {
-	if s3Host == "" {
-		return resourceURL
-	}
-	// 避免双斜杠问题：s3Host 可能以 / 结尾，resourceURL 可能以 / 开头
-	s3Host = strings.TrimSuffix(s3Host, "/")
-	resourceURL = strings.TrimPrefix(resourceURL, "/")
-	return s3Host + "/" + resourceURL
 }

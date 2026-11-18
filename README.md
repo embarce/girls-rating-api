@@ -103,59 +103,26 @@ docker-compose down
 
 ## API 接口
 
-### Swagger 文档
+完整接口说明（参数、响应示例、错误码、缓存行为）见 **[docs/API.md](docs/API.md)**。
 
-启动服务后访问 `http://localhost:8080/swagger/index.html` 查看完整的 API 文档。
+| Method | Path | 认证 | 说明 |
+|---|---|---|---|
+| GET | `/health` | 无 | 健康检查 |
+| GET | `/api/random` | 无 | 随机返回一批图片（Redis 随机池） |
+| GET | `/api/cosplay` | 无 | 图片资源分页列表（Redis 分页缓存） |
+| POST | `/api/v1/register` | 无 | 用户注册 |
+| POST | `/api/v1/login` | 无 | 用户登录，签发 JWT |
+| GET | `/api/v1/user` | JWT | 获取当前登录用户 |
+| POST | `/api/v1/upload/image` | `X-API-Key` | 上传图片到 R2 并落库 |
+| GET | `/swagger/index.html` | 无 | Swagger UI |
 
-### 健康检查
+统一响应格式：
 
-```bash
-GET /health
-```
-
-### 用户注册
-
-```bash
-POST /api/v1/register
-Content-Type: application/json
-
-{
-  "username": "testuser",
-  "email": "test@example.com",
-  "password": "123456"
-}
-```
-
-### 用户登录
-
-```bash
-POST /api/v1/login
-Content-Type: application/json
-
-{
-  "username": "testuser",
-  "password": "123456"
-}
-```
-
-响应:
 ```json
-{
-  "code": 200,
-  "message": "login successful",
-  "data": {
-    "access_token": "eyJhbGc...",
-    "refresh_token": "eyJhbGc..."
-  }
-}
+{ "msg": "success", "code": 200, "data": {} }
 ```
 
-### 获取用户信息
-
-```bash
-GET /api/v1/user
-Authorization: Bearer <access_token>
-```
+启动服务后可访问 `http://localhost:8080/swagger/index.html` 在线调试。
 
 ## Make 命令
 

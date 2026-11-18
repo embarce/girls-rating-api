@@ -9,3 +9,10 @@ services:
       - "9090:8080"
     volumes:
       - ./logs:/root/logs
+    # 敏感配置从同目录 .env（compose 自动读取做变量替换）或宿主机环境注入；
+    # 留空即关闭对应能力：TURNSTILE_SECRET_KEY 空 = 不启用人机验证，RESEND_API_KEY 空 = 邮件接口 503
+    environment:
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY:-}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      - MAIL_CONTACT_TO=${MAIL_CONTACT_TO:-}
