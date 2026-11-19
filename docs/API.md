@@ -11,15 +11,16 @@
 - [1. 健康检查](#1-健康检查)
 - [2. 随机图片](#2-随机图片)
 - [3. 分页列表](#3-分页列表)
-- [4. 用户注册](#4-用户注册)
-- [5. 用户登录](#5-用户登录)
-- [6. 当前用户信息](#6-当前用户信息)
-- [7. 上传图片](#7-上传图片)
-- [8. 抽卡](#8-抽卡)
-- [9. 管理端：作者 CRUD](#9-管理端作者-crud)
-- [10. 管理端：图片改档](#10-管理端图片改档)
-- [11. 邮件反馈](#11-邮件反馈)
-- [12. Swagger UI](#12-swagger-ui)
+- [4. 入口页最新图片](#4-入口页最新图片)
+- [5. 用户注册](#5-用户注册)
+- [6. 用户登录](#6-用户登录)
+- [7. 当前用户信息](#7-当前用户信息)
+- [8. 上传图片](#8-上传图片)
+- [9. 抽卡](#9-抽卡)
+- [10. 管理端：作者 CRUD](#10-管理端作者-crud)
+- [11. 管理端：图片改档](#11-管理端图片改档)
+- [12. 邮件反馈](#12-邮件反馈)
+- [13. Swagger UI](#13-swagger-ui)
 - [实现约束与已知问题](#实现约束与已知问题)
 - [维护约定](#维护约定)
 
@@ -85,22 +86,23 @@
 | 1 | GET | `/health` | 无 | 健康检查 |
 | 2 | GET | `/api/random` | 无 | 随机返回一批图片（Redis 随机池 v2） |
 | 3 | GET | `/api/cosplay` | 无 | 图片资源分页列表（Redis 分页缓存） |
-| 4 | POST | `/api/v1/register` | 无 | 用户注册 |
-| 5 | POST | `/api/v1/login` | 无 | 用户登录，签发 JWT |
-| 6 | GET | `/api/v1/user` | JWT | 获取当前登录用户 |
-| 7 | POST | `/api/v1/upload/image` | API Key | 上传图片到 R2 并落库（定档 rarity） |
-| 8 | POST | `/api/gacha/draw` | 设备 | 每日抽卡（幂等补发） |
-| 9 | GET | `/api/gacha/status` | 设备 | 抽卡状态 + 公示概率 |
-| 10 | GET | `/api/gacha/collection` | 设备 | 卡册分页 |
-| 11 | GET | `/api/v1/admin/authors` | API Key | 作者列表 / 存在性检查 |
-| 12 | POST | `/api/v1/admin/authors` | API Key | 幂等创建作者 |
-| 13 | GET/PATCH/DELETE | `/api/v1/admin/authors/:id` | API Key | 作者详情 / 更新 / 软删除 |
-| 14 | POST | `/api/v1/admin/authors/:id/avatar` | API Key | 上传作者头像到 R2 |
-| 15 | PATCH | `/api/v1/admin/images/:id` | API Key | 图片改档（rating/rarity/views/author_id） |
-| 16 | POST | `/api/v1/mail/contact` | Turnstile | 用户反馈邮件（Resend 中继） |
-| 17 | GET | `/swagger/*any` | 无 | Swagger UI |
+| 4 | GET | `/api/latest` | 无 | 入口页最新 N 张（默认 10，limit 1-20） |
+| 5 | POST | `/api/v1/register` | 无 | 用户注册 |
+| 6 | POST | `/api/v1/login` | 无 | 用户登录，签发 JWT |
+| 7 | GET | `/api/v1/user` | JWT | 获取当前登录用户 |
+| 8 | POST | `/api/v1/upload/image` | API Key | 上传图片到 R2 并落库（定档 rarity） |
+| 9 | POST | `/api/gacha/draw` | 设备 | 每日抽卡（幂等补发） |
+| 10 | GET | `/api/gacha/status` | 设备 | 抽卡状态 + 公示概率 |
+| 11 | GET | `/api/gacha/collection` | 设备 | 卡册分页 |
+| 12 | GET | `/api/v1/admin/authors` | API Key | 作者列表 / 存在性检查 |
+| 13 | POST | `/api/v1/admin/authors` | API Key | 幂等创建作者 |
+| 14 | GET/PATCH/DELETE | `/api/v1/admin/authors/:id` | API Key | 作者详情 / 更新 / 软删除 |
+| 15 | POST | `/api/v1/admin/authors/:id/avatar` | API Key | 上传作者头像到 R2 |
+| 16 | PATCH | `/api/v1/admin/images/:id` | API Key | 图片改档（rating/rarity/views/author_id） |
+| 17 | POST | `/api/v1/mail/contact` | Turnstile | 用户反馈邮件（Resend 中继） |
+| 18 | GET | `/swagger/*any` | 无 | Swagger UI |
 
-业务主链路是 2、3、7、8、9、10；反馈 16 面向浏览器；管理端 11–15 供爬虫自动化使用；4、5、6 是早期脚手架产物，当前前端不依赖。
+业务主链路是 2、3、4、8、9、10、11；反馈 17 面向浏览器；管理端 12–16 供爬虫自动化使用；5、6、7 是早期脚手架产物，当前前端不依赖。
 
 ---
 
@@ -235,7 +237,50 @@ GET /api/cosplay?page=1&pageSize=10&author_id=
 
 **错误**：500（MySQL 异常）。
 
-## 4. 用户注册
+## 4. 入口页最新图片
+
+```
+GET /api/latest?limit=10
+```
+
+无认证。按 `create_time` 倒序返回最新一批图片，供入口页（年龄门）高斯模糊背景墙使用。
+
+**Query 参数**
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---|---|---|
+| `limit` | int | 否 | 10 | 数量，1–20；超出范围或非数字时回退为 **10** |
+
+**响应 200** —— `data` 直接是数组（无分页包装），条目结构与 `/api/cosplay` 的 `list[]` 一致（含字符串化雪花 `id`）：
+
+```json
+{
+  "msg": "success",
+  "code": 200,
+  "data": [
+    {
+      "id": "1859483273912345600",
+      "resourceUrl": "https://static.example.com/images/2026/11/19/120000.jpg",
+      "width": 1200,
+      "height": 1600,
+      "rating": 4.7,
+      "views": "1k",
+      "rarity": "SR",
+      "author": { "name": "Embrace", "avatar": "https://www.girls-rating.com/images/avatars/avatar1.webp" }
+    }
+  ]
+}
+```
+
+**行为说明**
+
+- 复用分页列表查询（`create_time` DESC + 页缓存），与 `/api/cosplay` 第一页共享 `cache:image_resource:list:v1:page:1` 缓存条目。
+- 上传成功后分页缓存被清空，正常情况下新图立即可见。
+- Redis 异常不影响响应，降级直查 MySQL；库中无数据时返回 `"data": []`。
+
+**错误**：500（MySQL 异常）。
+
+## 5. 用户注册
 
 ```
 POST /api/v1/register
@@ -282,7 +327,7 @@ Content-Type: application/json
 | 409 | `username or email already exists` | 用户名或邮箱已占用 |
 | 500 | 数据库错误 | 连接/写入异常 |
 
-## 5. 用户登录
+## 6. 用户登录
 
 ```
 POST /api/v1/login
@@ -327,7 +372,7 @@ Content-Type: application/json
 | 403 | `missing turnstile token` / `turnstile verification failed` | 人机验证缺 token 或 siteverify 未通过（配置 TURNSTILE_SECRET_KEY 后） |
 | 500 | `user is disabled` / 其他 | 账号被禁用（注：语义上应为 403）；数据库异常 |
 
-## 6. 当前用户信息
+## 7. 当前用户信息
 
 ```
 GET /api/v1/user
@@ -361,7 +406,7 @@ Authorization: Bearer <access_token>
 | 404 | `user not found` | token 合法但用户已被删除 |
 | 500 | 数据库错误 | — |
 
-## 7. 上传图片
+## 8. 上传图片
 
 ```
 POST /api/v1/upload/image
@@ -433,7 +478,7 @@ curl -X POST http://localhost:8080/api/v1/upload/image \
 | 403 | `upload API key not configured` | 服务端 `UPLOAD_API_KEY` 为空 |
 | 500 | `failed to upload to r2` / `failed to save image resource` | 存储或落库失败 |
 
-## 8. 抽卡
+## 9. 抽卡
 
 三个公开接口，统一要求请求头 `X-Device-Id`（缺失或超 64 字符返回 400）。设计见 `docs/design/gacha-system.md`。
 
@@ -520,7 +565,7 @@ curl -X POST http://localhost:8080/api/v1/upload/image \
 
 每张卡带 `drawDate`（抽取日期）；`catalog` 为图鉴完成度统计（卡册内按 `resourceUrl` 去重的各档张数，与 `status.pool` 各档池存量相除即得完成度）。
 
-## 9. 管理端：作者 CRUD
+## 10. 管理端：作者 CRUD
 
 分组 `/api/v1/admin`，复用 `X-API-Key` 认证（与管理脚本同一信任域），面向爬虫自动化设计：**创建幂等、查询先行、重试安全**。设计见 `docs/design/photo-system.md` §5.2 / §5.4。
 
@@ -560,7 +605,7 @@ curl -X POST http://localhost:8080/api/v1/upload/image \
 
 multipart `file` 字段（JPEG/PNG/WebP/GIF）→ R2 `avatars/` 前缀 → 更新 URL + 失效作者缓存。也可在创建/更新时直接填外链 URL。
 
-## 10. 管理端：图片改档
+## 11. 管理端：图片改档
 
 ```
 PATCH /api/v1/admin/images/:id
@@ -583,7 +628,7 @@ Content-Type: application/json
 
 **错误**：400 参数 / 401 认证 / 404 图片不存在。
 
-## 11. 邮件反馈
+## 12. 邮件反馈
 
 ```
 POST /api/v1/mail/contact
@@ -612,7 +657,7 @@ Content-Type: application/json
 | 502 | `resend: ...` | Resend 上游错误 |
 | 503 | `mail not configured` | `RESEND_API_KEY` / `MAIL_FROM` / `MAIL_CONTACT_TO` 未配置齐 |
 
-## 12. Swagger UI
+## 13. Swagger UI
 
 ```
 GET /swagger/index.html

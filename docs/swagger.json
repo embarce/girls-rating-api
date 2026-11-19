@@ -208,6 +208,41 @@
                 }
             }
         },
+        "/api/latest": {
+            "get": {
+                "description": "按入档时间倒序返回最新一批图片（默认 10 张，limit 1-20），data 直接是数组、无分页包装，供入口页高斯模糊背景使用",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "图片资源"
+                ],
+                "summary": "入口页最新图片",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "数量，1-20",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LatestResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "服务器错误",
+                        "schema": {
+                            "$ref": "#/definitions/response.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/random": {
             "get": {
                 "description": "随机返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors 表），无需认证",
@@ -1103,6 +1138,23 @@
                     "type": "integer"
                 },
                 "data": {},
+                "msg": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.LatestResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.PhotoResponse"
+                    }
+                },
                 "msg": {
                     "type": "string"
                 }

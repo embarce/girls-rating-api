@@ -60,6 +60,9 @@ func (s *Server) setupRouter() {
 	// 图片资源分页查询接口（公开，不走 JWT）
 	s.Engine.GET("/api/cosplay", s.Cosplay)
 
+	// 入口页最新图片（公开，不走 JWT，供入口页高斯模糊背景）
+	s.Engine.GET("/api/latest", s.Latest)
+
 	// 抽卡接口（公开，不走 JWT，匿名 X-Device-Id 标识设备）
 	gacha := s.Engine.Group("/api/gacha")
 	{

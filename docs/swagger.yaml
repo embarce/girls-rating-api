@@ -60,6 +60,17 @@ definitions:
       msg:
         type: string
     type: object
+  handlers.LatestResponse:
+    properties:
+      code:
+        type: integer
+      data:
+        items:
+          $ref: '#/definitions/service.PhotoResponse'
+        type: array
+      msg:
+        type: string
+    type: object
   handlers.LoginRequest:
     properties:
       password:
@@ -327,6 +338,29 @@ paths:
       summary: 抽卡状态（今日能否抽 + 公示概率 + 累计统计）
       tags:
       - 抽卡
+  /api/latest:
+    get:
+      description: 按入档时间倒序返回最新一批图片（默认 10 张，limit 1-20），data 直接是数组、无分页包装，供入口页高斯模糊背景使用
+      parameters:
+      - default: 10
+        description: 数量，1-20
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.LatestResponse'
+        "500":
+          description: 服务器错误
+          schema:
+            $ref: '#/definitions/response.APIResponse'
+      summary: 入口页最新图片
+      tags:
+      - 图片资源
   /api/random:
     get:
       description: 随机返回图片资源列表（统一 PhotoResponse：rating 浮点、rarity 卡片等级、作者来自 authors
